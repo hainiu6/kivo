@@ -30,16 +30,14 @@
         lastTone = Date.now();
         try {
           const start = audio.currentTime;
-          for (const [frequency, offset] of [[880, 0], [1175, 0.18], [880, 0.5], [1568, 0.68]]) {
-            const oscillator = audio.createOscillator(), gain = audio.createGain();
-            oscillator.type = 'triangle'; oscillator.frequency.value = frequency;
-            gain.gain.setValueAtTime(0, start + offset);
-            gain.gain.linearRampToValueAtTime(0.28, start + offset + 0.015);
-            gain.gain.exponentialRampToValueAtTime(0.001, start + offset + 0.19);
-            oscillator.connect(gain); gain.connect(audio.destination);
-            oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
-            oscillator.start(start + offset); oscillator.stop(start + offset + 0.2);
-          }
+          const oscillator = audio.createOscillator(), gain = audio.createGain();
+          oscillator.type = 'sine'; oscillator.frequency.value = 1320;
+          gain.gain.setValueAtTime(0, start);
+          gain.gain.linearRampToValueAtTime(0.28, start + 0.015);
+          gain.gain.exponentialRampToValueAtTime(0.001, start + 0.45);
+          oscillator.connect(gain); gain.connect(audio.destination);
+          oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
+          oscillator.start(start); oscillator.stop(start + 0.46);
         } catch { renderSound(); }
       }
       async function unlock(preview = false) {

@@ -20,7 +20,7 @@ function harness({state,fail,delayMe=false,list=false}={}) {
   const context={console,Date,URL,URLSearchParams,Promise,Map,Set,setTimeout(){},clearTimeout(){},localStorage:{getItem(){return null;},setItem(){}},sessionStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},window:{matchMedia:()=>({matches:false}),addEventListener:(name,callback)=>{listeners[name]=callback;}},document:{hidden:false,querySelector:get,querySelectorAll:selector=>selector==='.nav-button'?nav:selector==='[data-status]'?tabs:[],createElement:node,createTextNode:text=>({textContent:text}),addEventListener(){}},KivoChat:{composer:()=>({isUploading:()=>false,clear(){},closePicker(){},destroy(){}}),renderMessage:m=>m,clearImages(){},forgetImages(){}},KivoNotifications:{create:()=>({start(){},reset(){},refresh(){},receive(){}})},KivoStats:{create:()=>({activate(){},deactivate(){},reset(){},schedule(){},setSites(){},setFilters(){},getFilters:()=>({statsDays:7,statsSite:''})})},io:()=>socket,fetch:async url=>{
     requests.push(url);if(url==='/api/admin/me'&&delayMe)await new Promise(resolve=>{resolveMe=resolve;});
     if(url==='/api/admin/me'&&fail){if(fail==='network')throw new Error('offline');return{ok:false,status:fail,json:async()=>({error:'请先登录'})};}
-    let data=url==='/api/admin/me'?{username:'admin',publicUrl:'https://chat.example'}:url==='/api/admin/sites'?[{id:siteId,name:'test',origins:['*'],greeting:'hello'}]:url.endsWith('/messages')?[{id:1,conversation_id:conversationId,sender:'agent',body:'你好',created_at:1}]:url===`/api/admin/conversations/${conversationId}`?c:list&&url.startsWith('/api/admin/conversations?')?[c]:[];
+    let data=url==='/api/admin/me'?{username:'admin',publicUrl:'https://chat.example',presence:{availability:'offline',onlineVisitors:3}}:url==='/api/admin/sites'?[{id:siteId,name:'test',origins:['*'],greeting:'hello'}]:url.endsWith('/messages')?[{id:1,conversation_id:conversationId,sender:'agent',body:'你好',created_at:1}]:url===`/api/admin/conversations/${conversationId}`?c:list&&url.startsWith('/api/admin/conversations?')?[c]:[];
     return{ok:true,json:async()=>data};
   }};
   vm.createContext(context);vm.runInContext(readFileSync(new URL('../public/admin-state.js',import.meta.url),'utf8'),context);context.KivoWorkspaceState=context.window.KivoWorkspaceState;
@@ -59,4 +59,21 @@ test('clicking a conversation focuses its reply field; reconnects and hidden-mod
   h.socket.connected=true;h.socketListeners.connect();await flush();assert.equal(h.get('#message-input').focused,1);
   h.nav.find(n=>n.dataset.view==='stats').onclick();await flush();assert.equal(h.get('#view-stats').hidden,false);
   h.socketListeners.connect();await flush();assert.equal(h.get('#message-input').focused,1);
+});
+
+test('live presence stays global when the inbox is filtered and transport reconnection preserves the chosen support status',async()=>{
+  const h=harness({list:true});await flush();
+  assert.equal(h.get('#online-visitors').textContent,3);
+  assert.equal(h.get('#support-availability').dataset.state,'offline');
+  h.socket.connected=true;h.socketListeners.connect();await flush();
+  assert.equal(h.get('#support-availability').dataset.state,'offline');
+  h.socketListeners['presence:update']({availability:'online',onlineVisitors:21});
+  assert.equal(h.get('#online-visitors').textContent,21);
+  assert.equal(h.get('#support-availability').dataset.state,'online');
+  h.socketListeners.disconnect();assert.equal(h.get('#support-availability').dataset.state,'online');
+  const row=h.get('#conversations').children[0];assert.equal(row.children[1].children.length,2);
+  assert.ok(row.children[1].children[0].children.some(n=>n.className==='row-presence offline'));
+  h.socketListeners.connect_error({message:'登录已过期'});
+  h.socketListeners['presence:update']({availability:'offline',onlineVisitors:999});
+  assert.equal(h.get('#online-visitors').textContent,21,'late events cannot change a logged-out workspace');
 });

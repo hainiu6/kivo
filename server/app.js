@@ -99,6 +99,12 @@ export function createKivo(options = {}) {
   });
   const visitors = new Map();
   const admins = new Set();
+  let availability = db.prepare("SELECT value FROM settings WHERE key='supportAvailability'").get()?.value === 'offline' ? 'offline' : 'online';
+  const agentsOnline = () => availability === 'online' && admins.size > 0;
+  const existingConversation = db.prepare('SELECT 1 FROM conversations WHERE id=?');
+  const presence = () => ({ availability, online: agentsOnline(), onlineVisitors: [...visitors].filter(([id, sockets]) => sockets.size && existingConversation.get(id)).length });
+  const publishPresence = () => io.to('admins').emit('presence:update', presence());
+  const publishAgents = () => { io.emit('agents:status', { online: agentsOnline() }); publishPresence(); };
   const sessionUser = req => {
     const raw = cookieToken(req);
     if (!raw) return null;
@@ -152,7 +158,7 @@ export function createKivo(options = {}) {
     const lastSent = db.prepare('SELECT last_sent FROM auto_reply_state WHERE conversation_id=?').get(id)?.last_sent || 0;
     let body;
     if (first && config.firstEnabled) body = config.firstMessage;
-    else if (!admins.size && config.offlineEnabled && now() - lastSent >= 300000) body = config.offlineMessage;
+    else if (!agentsOnline() && config.offlineEnabled && now() - lastSent >= 300000) body = config.offlineMessage;
     if (!body) return;
     saveMessage(id, 'auto', { body, clientId: randomUUID() });
   }
@@ -234,7 +240,14 @@ export function createKivo(options = {}) {
     // Only already-valid sessions reach this handler. Upgrade existing logins too.
     db.prepare('UPDATE sessions SET expires=? WHERE token=?').run(now() + SESSION_MAX_AGE, hash(raw));
     res.cookie('kivo_session', raw, { httpOnly: true, sameSite: 'lax', secure: publicOrigin.startsWith('https:'), path: '/', maxAge: SESSION_MAX_AGE });
-    res.json({ username: req.user.username, publicUrl });
+    res.json({ username: req.user.username, publicUrl, presence: presence() });
+  });
+  app.get('/api/admin/presence', (req, res) => res.json(presence()));
+  app.put('/api/admin/presence', (req, res) => {
+    if (!['online', 'offline'].includes(req.body?.availability)) return res.status(400).json({ error: '请选择在线或离线' });
+    db.prepare("INSERT INTO settings VALUES('supportAvailability',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(req.body.availability);
+    availability = req.body.availability;
+    publishAgents(); res.json(presence());
   });
   app.post('/api/admin/logout', (req, res) => {
     const raw = cookieToken(req);
@@ -421,7 +434,7 @@ export function createKivo(options = {}) {
     refreshExpiry();
     if (!socket.connected) return;
     if (socket.data.role === 'admin') {
-      socket.join('admins'); admins.add(socket.id); io.emit('agents:status', { online: true });
+      socket.join('admins'); admins.add(socket.id); publishAgents();
     } else {
       const id = socket.data.conversationId;
       const ip = ipOf(socket.request);
@@ -429,7 +442,8 @@ export function createKivo(options = {}) {
       socket.join(`conversation:${id}`);
       if (!visitors.has(id)) visitors.set(id, new Set());
       visitors.get(id).add(socket.id); updateConversation(id);
-      socket.emit('history', messages(id)); socket.emit('agents:status', { online: admins.size > 0 });
+      publishPresence();
+      socket.emit('history', messages(id)); socket.emit('agents:status', { online: agentsOnline() });
     }
     let windowStart = now(), count = 0;
     socket.on('message:send', (data, ack = () => {}) => {
@@ -462,8 +476,8 @@ export function createKivo(options = {}) {
     });
     socket.on('disconnect', () => {
       clearTimeout(identityExpiry);
-      if (socket.data.role === 'admin') { admins.delete(socket.id); io.emit('agents:status', { online: admins.size > 0 }); }
-      else { const id = socket.data.conversationId; visitors.get(id)?.delete(socket.id); if (!visitors.get(id)?.size) visitors.delete(id); updateConversation(id); }
+      if (socket.data.role === 'admin') { admins.delete(socket.id); publishAgents(); }
+      else { const id = socket.data.conversationId; visitors.get(id)?.delete(socket.id); if (!visitors.get(id)?.size) visitors.delete(id); updateConversation(id); publishPresence(); }
     });
   });
   const cleanup = setInterval(() => {

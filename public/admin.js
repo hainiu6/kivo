@@ -5,6 +5,33 @@ let socket, publicUrl, sites = [], conversations = [], activeId = null, activeMe
 let loadingMessages = false, sending = false, toastTimer;
 let pendingMessages = [];
 let authenticated=false, accountUsername='', starting=false;
+let supportAvailability='online', presenceRevision=0, presenceSaving=false;
+function renderAvailability() {
+  const online=supportAvailability==='online',button=$('#support-availability');
+  button.dataset.state=online?'online':'offline';button.setAttribute('aria-pressed',String(online));
+  button.title=`客服${online?'在线':'离线'}，点击设为${online?'离线':'在线'}（所有客服同步）`;button.setAttribute('aria-label',button.title);
+  button.querySelector('.availability-label').textContent=`客服${online?'在线':'离线'}`;
+  button.disabled=presenceSaving;
+}
+function applyPresence(data) {
+  if(!authenticated||!['online','offline'].includes(data?.availability))return;
+  presenceRevision++;supportAvailability=data.availability;renderAvailability();
+  $('#online-visitors').textContent=Number.isSafeInteger(data.onlineVisitors)?Math.max(0,data.onlineVisitors):0;
+}
+async function refreshPresence() {
+  const revision=presenceRevision;
+  try{const data=await api('/api/admin/presence');if(revision===presenceRevision)applyPresence(data);}catch(e){if(authenticated)toast(e.message);}
+}
+$('#support-availability').onclick=async()=>{
+  if(!authenticated||presenceSaving)return;
+  presenceSaving=true;renderAvailability();const revision=presenceRevision;
+  try{
+    const data=await api('/api/admin/presence',{method:'PUT',body:JSON.stringify({availability:supportAvailability==='online'?'offline':'online'})});
+    if(revision===presenceRevision)applyPresence(data);
+    if(authenticated)toast(supportAvailability==='online'?'已设为在线接待':'已设为离线，访客可留言');
+  }catch(e){if(authenticated)toast(e.message);}
+  finally{presenceSaving=false;renderAvailability();}
+};
 let replies = [];
 let avatarUploading=false, avatarRevision=0;
 let clearedThroughId=0, deletedMessageIds=new Set(), deletePlan, deleteRevision=0, deleting=false;
@@ -38,7 +65,7 @@ async function api(url, options = {}) {
   return data;
 }
 const post = (url, data = {}) => api(url,{method:'POST',body:JSON.stringify(data)});
-function showLogin() { authenticated=false;accountUsername='';KivoWorkspaceState.clear();view='inbox';status='open';selectionRevision++;listRevision++;loadingMessages=false;drafts.clear();$('#loading-screen').hidden=true; stats.reset();notifications.reset(); $('#delete-dialog').close(); $('#identity-dialog').close(); $('#identity-secret').value=''; $('#site-dialog').close(); socket?.disconnect(); composer.destroy(); KivoChat.clearImages(); $('#workspace').hidden = true; $('#login-screen').hidden = false; activeId = null; $('#chat-empty').hidden = false; $('#chat-active').hidden = true; $('#visitor-empty').hidden = false; $('#visitor-details').hidden = true; }
+function showLogin() { presenceRevision++; authenticated=false;accountUsername='';KivoWorkspaceState.clear();view='inbox';status='open';selectionRevision++;listRevision++;loadingMessages=false;drafts.clear();$('#loading-screen').hidden=true; stats.reset();notifications.reset(); $('#delete-dialog').close(); $('#identity-dialog').close(); $('#identity-secret').value=''; $('#site-dialog').close(); socket?.disconnect(); composer.destroy(); KivoChat.clearImages(); $('#workspace').hidden = true; $('#login-screen').hidden = false; activeId = null; $('#chat-empty').hidden = false; $('#chat-active').hidden = true; $('#visitor-empty').hidden = false; $('#visitor-details').hidden = true; }
 function rememberWorkspace() { if(authenticated)KivoWorkspaceState.save(accountUsername,{view,status,site:$('#site-filter').value,query:$('#search').value,conversation:activeId||'',draft:$('#message-input').value,...stats.getFilters()}); }
 function switchView(next,load=true) {
   view = next; ['inbox','sites','replies','stats','settings'].forEach(v => $(`#view-${v}`).hidden = v !== next);
@@ -53,6 +80,7 @@ function switchView(next,load=true) {
 async function start() {
   const me = await api('/api/admin/me'); publicUrl = me.publicUrl;
   const saved=KivoWorkspaceState.load(me.username);accountUsername=me.username;authenticated=true;
+  applyPresence(me.presence);
   view=saved.view;status=saved.status;activeId=saved.conversation||null;$('#search').value=saved.query;
   drafts.clear();if(activeId&&saved.draft)drafts.set(activeId,saved.draft);$('#message-input').value=saved.draft;
   $$('[data-status]').forEach(b=>b.classList.toggle('active',b.dataset.status===status));
@@ -68,12 +96,14 @@ async function start() {
   socket.on('connect', () => {
     notifications.refresh();
     stats.schedule();
-    $('#connection-label').textContent = '在线接待中'; $('#connection-dot').classList.remove('offline'); $('#send-message').disabled = sending||composer.isUploading();
+    refreshPresence();
+    $('#connection-label').textContent = '工作台已连接'; $('#connection-dot').classList.remove('offline'); $('#send-message').disabled = sending||composer.isUploading();
     loadConversations().catch(e => toast(e.message));
     if (activeId) selectConversation(activeId).catch(e => toast(e.message));
   });
   socket.on('disconnect', () => { $('#connection-label').textContent = '连接已断开'; $('#connection-dot').classList.add('offline'); $('#send-message').disabled = true; });
   socket.on('connect_error', e => { $('#connection-label').textContent = '正在重新连接'; $('#connection-dot').classList.add('offline'); $('#send-message').disabled = true; if (e.message === '登录已过期') showLogin(); });
+  socket.on('presence:update', applyPresence);
   socket.on('conversation:update', c => {
     notifications.refresh();
     stats.schedule();
@@ -156,10 +186,13 @@ function renderConversations() {
     const row = element('button',`conversation-row${activeId===c.id?' selected':''}`); row.type='button';
     row.append(element('span','avatar',c.name.slice(-2)));
     const content = element('div','row-content'), title=element('div','row-title');
-    title.append(element('strong','',c.name),element('time','',clock(c.updated_at)));
-    const sub=element('div','row-site'); const dot=element('span','status-dot'+(c.online?'':' offline'));sub.append(dot,document.createTextNode(c.site_name));
+    const presence=element('span','row-presence'+(c.online?'':' offline'));
+    presence.append(element('span','status-dot'+(c.online?'':' offline')),document.createTextNode(c.online?'在线':'离线'));
+    title.append(element('strong','',c.name),presence,element('time','',clock(c.updated_at)));
+    const sub=element('div','row-summary'),site=element('span','row-site',c.site_name);site.title=c.site_name;
+    sub.append(element('div','row-preview',c.last_message||'访客已打开页面'),site);
     if(c.unread) sub.append(element('span','unread-badge',c.unread>99?'99+':c.unread));
-    content.append(title,element('div','row-preview',c.last_message||'访客已打开页面'),sub);row.append(content);
+    content.append(title,sub);row.append(content);
     row.onclick=()=>selectConversation(c.id,true).catch(e=>toast(e.message));list.append(row);
   });
 }
