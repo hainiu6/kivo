@@ -14,6 +14,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: for file in examples/php/*.php examples/laravel54/config/*.php examples/laravel54/app/Http/Controllers/*.php examples/laravel54/routes/*.php; do php -l "$file"; done
       - run: npm test
       - run: npm audit --omit=dev
       - run: for file in scripts/*.sh; do bash -n "$file"; done

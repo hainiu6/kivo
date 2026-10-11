@@ -14,6 +14,7 @@
 - 双方可选择、粘贴或拖入图片，发送普通表情与原创「团团」动态表情；图片支持点击放大。客服窗口最大 460 × 760，双方聊天正文和输入文字为 16px。
 - Socket.IO 实时消息、断线重连、历史记录、访客凭证恢复会话；支持加载更早消息。
 - 多网站接入：生成独立嵌入代码、指定允许来源或允许所有网站、网站配置与测试页面。
+- PHP 网站登录用户对接：后端签名校验，后台显示 / 搜索用户 ID、账号和昵称；同账号跨设备恢复历史，匿名及不同账号互相隔离。
 - 管理员密码哈希、HttpOnly Cookie、请求来源校验、登录及消息频率限制、修改密码撤销登录。
 - Docker 镜像一键安装、升级前在线备份、健康检查及失败回退。
 
@@ -111,6 +112,8 @@ KIVO_VERSION=v1.1.0 bash /opt/kivo/scripts/upgrade.sh
 
 4. 打开网站，点击右下角图标发送消息；后台会话列表实时出现对话。也可先使用后台「打开测试页面」。
 
+需要把网站登录账号传给客服时，打开网站卡片的 **PHP 用户对接**，生成后端签名密钥，按 [PHP / Laravel 对接说明](docs/php-integration.md) 配置。仓库提供普通 PHP 和针对 Laravel 5.4 的示例，由你自行复制到网站；密钥只保存在 PHP 后端。身份接口与网站同源，加载器读取 Session 对应的签名凭证，客服后台显示真实账号。单页网站在 AJAX 登录、退出或切换账号成功后调用 `window.Kivo?.refreshIdentity()`。
+
 有 CSP 的网站请允许客服域名的 `script-src`、`frame-src` 和 `connect-src`，加载器内联样式也需相应的 `style-src` 许可。嵌入代码不包含管理员凭证。
 
 访客地区由本地 GeoLite 数据估算，内网通常显示「未知 / 内网」，VPN / 代理会影响结果。当前 URL 每 2 秒检测 SPA 变化，多标签页显示最近上报的地址。组件存储随机访客凭证并收集 IP、URL；在网站隐私说明中说明用途，页面 URL 不应含密码等秘密。保留 geoip-lite 包内授权和来源说明。
@@ -179,7 +182,7 @@ bash scripts/docker.sh start kivo
 
 ## 开发与发布
 
-需要 Node.js 24+，使用内置 `node:sqlite`，无需外部数据库：
+需要 Node.js 24+，使用内置 `node:sqlite`，无需外部数据库；测试 PHP 签名示例另需 PHP CLI（示例语法兼容 PHP 5.6+，本地在 PHP 7.4 验证）：
 
 ```bash
 npm ci
@@ -200,6 +203,8 @@ for file in scripts/*.sh test/*.sh; do bash -n "$file"; done
 独立运行时测试在特权 Debian 10 容器中启动真实 dockerd，验证独立 socket、存储、网桥及应用健康状态；测试适配器执行生成的 systemd 单元启动命令，完整 systemd 启动流程与 4.19 内核仍需在目标服务器验证。运行时配置依据 [dockerd 官方参数文档](https://docs.docker.com/reference/cli/dockerd/)。
 
 在 GitHub Actions 手动运行 **Docker release** 并指定新版本号，或推送 `v*` 标签，即可发布双架构安装包、SHA256SUMS、version.txt。服务器安装器下载 Release 附件，不需要镜像仓库账号。安装包包含镜像与安装 / 升级脚本，升级跟随已测试发行版本。
+
+PHP 对接测试覆盖 PHP / Node 签名互通、伪造与过期凭证、账号和匿名隔离、同账号多设备、图片授权、密钥重置和数据库重启保留；Docker 升级测试同时验证用户关联和签名密钥保留。
 
 目前为单实例、单管理员的客服系统，支持图片附件，不包含其他文件上传、客服分配或多管理员管理。SQLite 与内存在线状态适用于单机部署，请勿直接横向扩容多个实例。
 

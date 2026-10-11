@@ -1,6 +1,7 @@
 /* global io, KivoChat */
 const $ = id => document.getElementById(id);
 let socket, parentOrigin, currentPage, initialized = false, opened = false, rows = [], sending = false;
+let conversationId, generation=0, hasIdentity=false;
 let visitorToken, supportName='在线客服', avatarUrl='/support-avatar.svg';
 const siteId = new URLSearchParams(location.search).get('site');
 const authHeaders = () => ({Authorization:`Bearer ${visitorToken}`,'X-Kivo-Site':siteId});
@@ -20,16 +21,26 @@ function render() {
   if(nearBottom)$('messages').scrollTop=$('messages').scrollHeight;
 }
 function add(m) { if(rows.some(r=>r.id===m.id))return;rows.push(m);rows.sort((a,b)=>a.id-b.id);render();if(m.sender!=='visitor'&&!opened)tell('unread'); }
+function reset() {
+  generation++;socket?.removeAllListeners();socket?.disconnect();socket=null;initialized=false;sending=false;rows=[];visitorToken=undefined;conversationId=null;hasIdentity=false;
+  composer.clear();composer.closePicker();KivoChat.clearImages();$('message-items').replaceChildren();$('message-input').value='';$('message-input').disabled=true;$('send').disabled=true;error('');
+}
 function initialize(data, origin) {
-  if(initialized||data.site?.id!==siteId||origin!==data.parentOrigin)return;
+  if(data.site?.id!==siteId||origin!==data.parentOrigin)return;
   const page=new URL(data.page);if(page.origin!==origin)return;
-  initialized=true;parentOrigin=origin;opened=data.opened;currentPage=data.page;visitorToken=data.visitorToken;
+  if(initialized&&conversationId===data.conversationId) {
+    visitorToken=data.visitorToken;socket.auth={role:'visitor',siteId,visitorToken};
+    if(socket.connected)socket.emit('visitor:identity',{visitorToken},result=>{if(!result?.ok)error('用户身份更新失败，请刷新页面');});
+    else socket.connect();
+    return;
+  }
+  reset();initialized=true;parentOrigin=origin;opened=data.opened;currentPage=data.page;visitorToken=data.visitorToken;conversationId=data.conversationId;hasIdentity=!!data.identity;
   supportName=data.site.supportName||'在线客服';avatarUrl=/^\/avatars\/[\da-f-]{36}$/.test(data.site.avatarUrl||'')?data.site.avatarUrl:'/support-avatar.svg';
   document.documentElement.style.setProperty('--accent',data.site.color);document.documentElement.style.setProperty('--accent-ink',KivoChat.contrast(data.site.color));$('site-name').textContent=supportName;$('support-avatar').src=avatarUrl;$('greeting').textContent=data.site.greeting;
   socket=io({auth:{role:'visitor',siteId,visitorToken:data.visitorToken},reconnection:true});
   socket.on('connect',()=>{$('message-input').disabled=false;$('send').disabled=sending||composer.isUploading();error('');socket.emit('visitor:page',{page:currentPage});});
-  socket.on('disconnect',()=>{$('agent-status').textContent='连接已断开，正在重连…';$('send').disabled=true;});
-  socket.on('connect_error',()=>{$('agent-status').textContent='暂时无法连接';error('连接暂时不可用，正在自动重试。');$('send').disabled=true;});
+  socket.on('disconnect',reason=>{if(hasIdentity&&reason==='io server disconnect')tell('identity-expired');$('agent-status').textContent='连接已断开，正在重连…';$('send').disabled=true;});
+  socket.on('connect_error',()=>{if(hasIdentity)tell('identity-expired');$('agent-status').textContent='暂时无法连接';error('连接暂时不可用，正在自动重试。');$('send').disabled=true;});
   socket.on('agents:status',data=>$('agent-status').textContent=data.online?'● 客服在线，随时为你服务':'○ 客服暂时离线，请留言，我们会尽快回复');
   socket.on('history',messages=>{rows=messages;render();$('messages').scrollTop=$('messages').scrollHeight;});
   socket.on('message:new',add);
@@ -38,6 +49,7 @@ window.addEventListener('message',event=>{
   if(event.source!==parent||!event.data?.kivo)return;
   if(event.data.type==='init'){try{initialize(event.data,event.origin);}catch{error('初始化失败，请刷新页面重试。');}return;}
   if(event.origin!==parentOrigin)return;
+  if(event.data.type==='reset'){reset();return;}
   if(event.data.type==='page'){const page=event.data.page;try{if(typeof page==='string'&&new URL(page).origin===parentOrigin){currentPage=page;if(socket?.connected)socket.emit('visitor:page',{page});}}catch{/* Ignore invalid host page notifications. */}}
   if(event.data.type==='visibility'){opened=!!event.data.opened;if(opened){$('messages').scrollTop=$('messages').scrollHeight;$('message-input').focus();}}
 });
@@ -47,8 +59,10 @@ $('message-form').onsubmit=e=>{
   e.preventDefault();if(sending||composer.isUploading())return;const body=$('message-input').value.trim();if(!body&&!composer.hasAttachment())return;
   if(!socket?.connected){error('连接已断开，请稍后再试。');return;}
   sending=true;$('send').disabled=true;error('');
+  const currentGeneration=generation;
   const attachment=composer.payload();
   socket.timeout(8000).emit('message:send',{...attachment,body,clientId:window.kivoMessageId()},(err,result)=>{
+    if(currentGeneration!==generation)return;
     sending=false;$('send').disabled=!socket.connected;
     if(err||!result?.ok){error(err?'未收到发送确认，请查看聊天记录后重试。':result.error);return;}
     add(result.message);composer.clear();if($('message-input').value.trim()===body)$('message-input').value='';$('messages').scrollTop=$('messages').scrollHeight;

@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag (e.g. v1.3.2); must be new'
+        description: 'Release tag (e.g. v1.4.0); must be new'
         required: true
-        default: v1.3.2
+        default: v1.4.0
   push:
     tags: ['v*']
 permissions:
@@ -28,6 +28,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci && npm run check && npm test && npm audit --omit=dev
+      - run: for file in examples/php/*.php examples/laravel54/config/*.php examples/laravel54/app/Http/Controllers/*.php examples/laravel54/routes/*.php; do php -l "$file"; done
       - run: bash test/runtime-detection.sh
       - name: Build image and test Debian 10 deployment
         env:
@@ -64,5 +65,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。\n\n图片上传改为标准 multipart 表单，先读取本地文件再上传，兼容旧版原始上传接口。代理错误页及文件读取失败显示明确中文提示，避免直接显示英文解析错误。双方支持选择、粘贴及拖入本地图片，预览后发送。客服窗口加大到最大 460 × 760，双方聊天正文和输入文字放大为 16px。升级后请强制刷新后台及接入网站。\n\n服务器无需 apt、Git、npm 或 Compose。安装与升级命令见仓库 README。升级前自动备份，健康检查失败恢复旧容器。两个架构均通过实际容器内头像和双向图片上传、Debian 10 用户空间的安装、升级、图片和数据保留、端口冲突与失败回退测试（CI 主机内核）。\n' > release-notes.md
+          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '新增 PHP 网站用户身份对接：后台显示并搜索用户 ID、账号及昵称，同一网站账号跨设备恢复聊天历史；匿名访客和不同账号的记录互相隔离。后端 HMAC-SHA256 签名，短期凭证、到期断开、图片权限校验和网站密钥重置。' '网站接入卡片新增「PHP 用户对接」，可生成、复制或关闭后端密钥，提供带身份接口的嵌入代码。普通 PHP 和 Laravel 5.4 示例及手动复制配置步骤见 docs/php-integration.md，网站文件由用户自行部署。' '升级保留网站、会话、图片、用户关联和签名密钥；升级后强制刷新后台及接入网站。服务器无需 PHP、apt、Git、npm 或 Compose；PHP 仅运行在业务网站的后端。' '两个架构均通过 PHP 签名互通、账号隔离及图片授权测试、实际容器上传，以及 Debian 10 用户空间安装、升级、账号关联与密钥保留、端口冲突和失败回退测试（CI 主机内核）。' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md

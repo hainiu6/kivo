@@ -19,7 +19,7 @@ async function api(url, options = {}) {
   return data;
 }
 const post = (url, data = {}) => api(url,{method:'POST',body:JSON.stringify(data)});
-function showLogin() { socket?.disconnect(); composer.destroy(); KivoChat.clearImages(); $('#workspace').hidden = true; $('#login-screen').hidden = false; activeId = null; $('#chat-empty').hidden = false; $('#chat-active').hidden = true; $('#visitor-empty').hidden = false; $('#visitor-details').hidden = true; }
+function showLogin() { $('#identity-dialog').close(); $('#identity-secret').value=''; $('#site-dialog').close(); socket?.disconnect(); composer.destroy(); KivoChat.clearImages(); $('#workspace').hidden = true; $('#login-screen').hidden = false; activeId = null; $('#chat-empty').hidden = false; $('#chat-active').hidden = true; $('#visitor-empty').hidden = false; $('#visitor-details').hidden = true; }
 function switchView(next) {
   view = next; ['inbox','sites','replies','settings'].forEach(v => $(`#view-${v}`).hidden = v !== next);
   $('#workspace').classList.toggle('inbox-mode', next === 'inbox');
@@ -45,7 +45,7 @@ async function start() {
   socket.on('conversation:update', c => {
     if (!c) return;
     const index = conversations.findIndex(item => item.id === c.id);
-    const matches = (!status || c.status === status) && (!$('#site-filter').value || c.site_id === $('#site-filter').value) && (!$('#search').value || [c.name,c.ip,c.page].some(s => s.toLowerCase().includes($('#search').value.toLowerCase())));
+    const matches = (!status || c.status === status) && (!$('#site-filter').value || c.site_id === $('#site-filter').value) && (!$('#search').value || [c.name,c.ip,c.page,c.user_id||'',c.account||'',c.nickname||''].some(s => s.toLowerCase().includes($('#search').value.toLowerCase())));
     if (matches) { if (index >= 0) conversations[index] = c; else conversations.unshift(c); }
     else if (index >= 0) conversations.splice(index,1);
     renderConversations(); if (activeId === c.id) renderDetails(c);
@@ -111,6 +111,7 @@ function renderDetails(c) {
   $('#chat-name').textContent=c.name;$('#chat-meta').textContent=`${c.online?'访客在线':'访客离线'} · ${c.site_name}`;
   $('#chat-avatar').textContent=c.name.slice(-2);$('#visitor-avatar').textContent=c.name.slice(-2);$('#visitor-name').textContent=c.name;
   $('#visitor-status').textContent=c.online?'● 在线':'● 离线';$('#visitor-status').classList.toggle('offline',!c.online);
+  $('#visitor-identity').textContent=c.user_id?'已验证的网站用户':'匿名访客';$('#visitor-user-id').textContent=c.user_id||'—';$('#visitor-account').textContent=c.account||'—';$('#visitor-nickname').textContent=c.nickname||'—';
   $('#visitor-ip').textContent=c.ip;$('#visitor-region').textContent=c.region;$('#visitor-site').textContent=c.site_name;
   $('#visitor-os').textContent=c.os||'未知系统';$('#visitor-browser').textContent=c.browser||'未知浏览器';
   $('#visitor-page').textContent=c.page;$('#visitor-page').href=c.page;
@@ -159,10 +160,33 @@ function renderSites() {
     if(s.autoReply?.offlineEnabled) origins.append(element('span','','离线自动回复'));
     const code=element('textarea','embed-code');code.value=embedCode(s);code.readOnly=true;code.setAttribute('aria-label',`${s.name} 的嵌入代码`);
     const actions=element('div','site-actions');const copy=element('button','button primary small','复制嵌入代码');copy.onclick=async()=>{try{await navigator.clipboard.writeText(code.value);toast('嵌入代码已复制');}catch{code.select();toast('请按 Ctrl+C / ⌘C 复制选中的代码');}};
-    const demo=element('a','text-link','打开测试页面 ↗');demo.href=`/demo?site=${encodeURIComponent(s.id)}`;demo.target='_blank';demo.rel='noopener';actions.append(copy,demo);
+    const demo=element('a','text-link','打开测试页面 ↗');demo.href=`/demo?site=${encodeURIComponent(s.id)}`;demo.target='_blank';demo.rel='noopener';const identity=element('button','button secondary small','PHP 用户对接');identity.type='button';identity.onclick=()=>openIdentity(s);actions.append(copy,demo,identity);
     card.append(header,origins,element('p','',s.greeting),code,actions);list.append(card);
   });
 }
+let identitySiteId, identityRevision=0;
+function renderIdentity(data) {
+  $('#identity-status').textContent=data.enabled?'已启用：将网站 ID 和密钥填入 PHP 后端配置。':'尚未启用：先生成密钥，再配置 PHP 登录状态接口。';
+  $('#identity-site-id').value=data.siteId;$('#identity-secret').value=data.secret;$('#identity-secret').type='password';$('#identity-show').textContent='显示密钥';
+  $('#identity-rotate').textContent=data.enabled?'重置密钥':'生成密钥';$('#identity-disable').disabled=!data.enabled;$('#identity-copy').disabled=!data.enabled;
+}
+async function openIdentity(s) {
+  identitySiteId=s.id;const revision=++identityRevision;$('#identity-title').textContent=s.name+' · PHP 用户对接';$('#identity-error').textContent='';$('#identity-secret').value='';$('#identity-site-id').value=s.id;
+  $('#identity-code').value=`<script src="${publicUrl}/widget.js" data-site="${s.id}" data-identity-url="/kivo/identity" async></script>`;
+  $('#identity-status').textContent='正在读取配置…';$('#identity-rotate').disabled=true;$('#identity-disable').disabled=true;$('#identity-copy').disabled=true;$('#identity-dialog').showModal();
+  try {const data=await api(`/api/admin/sites/${s.id}/identity`);if(revision===identityRevision){renderIdentity(data);$('#identity-rotate').disabled=false;}}catch(e){if(revision===identityRevision)$('#identity-error').textContent=e.message;}
+}
+$('#close-identity').onclick=()=>$('#identity-dialog').close();$('#identity-dialog').addEventListener('close',()=>{identityRevision++;$('#identity-secret').value='';});
+$('#identity-show').onclick=()=>{const show=$('#identity-secret').type==='password';$('#identity-secret').type=show?'text':'password';$('#identity-show').textContent=show?'隐藏密钥':'显示密钥';};
+async function identityAction(action) {
+  if(action==='rotate'&&$('#identity-secret').value&&!confirm('重置后旧 PHP 密钥立即失效，需要同步修改网站配置。继续重置？'))return;
+  const revision=identityRevision;$('#identity-rotate').disabled=true;$('#identity-disable').disabled=true;
+  try{const data=await post(`/api/admin/sites/${identitySiteId}/identity`,{action});if(revision===identityRevision){renderIdentity(data);$('#identity-error').textContent='';}}
+  catch(e){if(revision===identityRevision)$('#identity-error').textContent=e.message;}
+  finally{if(revision===identityRevision){$('#identity-rotate').disabled=false;$('#identity-disable').disabled=!$('#identity-secret').value;}}
+}
+$('#identity-rotate').onclick=()=>identityAction('rotate');$('#identity-disable').onclick=()=>identityAction('disable');
+for(const [button,field] of [['#identity-copy','#identity-secret'],['#identity-copy-code','#identity-code']])$(button).onclick=async()=>{try{await navigator.clipboard.writeText($(field).value);toast('已复制');}catch{$(field).focus();$(field).select();toast('请按 Ctrl+C / ⌘C 复制选中的内容');}};
 function openSite(s) {
   const f=$('#site-form');f.reset();f.elements.id.value=s?.id||'';f.elements.name.value=s?.name||'';f.elements.origins.value=s?.origins.join('\n')||'';f.elements.color.value=s?.color||'#0f766e';f.elements.greeting.value=s?.greeting||'你好，欢迎联系我们！有什么可以帮你？';$('#site-form-title').textContent=s?'编辑网站':'添加网站';$('#site-error').textContent='';$('#site-dialog').showModal();
   avatarRevision++;avatarUploading=false;f.elements.supportName.value=s?.supportName||'在线客服';f.elements.avatarId.value=s?.avatarId||'';$('#avatar-preview').src=s?.avatarUrl||'/support-avatar.svg';f.querySelector('[type="submit"]').disabled=false;

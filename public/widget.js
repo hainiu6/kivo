@@ -7,8 +7,9 @@
   window.__kivoWidget = true;
   const service = new URL(script.src).origin;
   const key = `kivo:${service}:${siteId}`;
-  let visitorToken;
-  try { visitorToken = localStorage.getItem(key); } catch { /* storage may be blocked */ }
+  const identityPath = script.getAttribute('data-identity-url');
+  let anonymousToken;
+  try { anonymousToken = localStorage.getItem(key); } catch { /* storage may be blocked */ }
   const host = document.createElement('div');
   host.id = 'kivo-support';
   const shadow = host.attachShadow({ mode: 'open' });
@@ -22,22 +23,42 @@
   const frame = document.createElement('iframe');frame.title = 'Kivo 在线客服';frame.src = `${service}/widget?site=${encodeURIComponent(siteId)}`;frame.referrerPolicy = 'strict-origin-when-cross-origin';panel.append(frame);
   const error = document.createElement('div');error.className = 'error';error.hidden = true;error.setAttribute('role', 'alert');
   shadow.append(style, panel, error, launcher);
-  let session, ready = false, opened = false, booting = false, lastPage = location.href;
+  let session, ready = false, opened = false, booting = false, bootstrapRevision = 0, lastPage = location.href;
   function tell(type, data = {}) { frame.contentWindow?.postMessage({ kivo:true, type, ...data }, service); }
   function initialize() { if (ready && session) tell('init', { ...session, page:location.href, parentOrigin:location.origin, opened }); }
-  async function bootstrap() {
-    if (booting) return;
+  async function bootstrap(reset = false) {
+    if (booting && !reset) return;
+    const revision = ++bootstrapRevision;
+    if (reset) { session = null; tell('reset'); }
     booting = true;
     try {
-      const res = await fetch(`${service}/api/widget/session`, { method:'POST', headers:{ 'Content-Type':'application/json' }, credentials:'omit', body:JSON.stringify({ siteId, visitorToken, page:location.href }) });
+      let identityToken = null;
+      if (identityPath) {
+        const identityUrl = new URL(identityPath, location.href);
+        if (identityUrl.origin !== location.origin) throw new Error('用户身份接口须位于当前网站');
+        const identityResponse = await fetch(identityUrl.href, {credentials:'same-origin',cache:'no-store'});
+        if (!identityResponse.ok) throw new Error(`网站用户身份接口不可用（HTTP ${identityResponse.status}）`);
+        let result;
+        try { result = await identityResponse.json(); } catch { throw new Error('网站用户身份接口须返回 JSON，请检查 PHP 登录配置'); }
+        if (!result || !(result.identityToken === null || typeof result.identityToken === 'string' && result.identityToken.length > 0)) throw new Error('网站用户身份接口返回格式无效');
+        identityToken = result.identityToken;
+      }
+      if (revision !== bootstrapRevision) return;
+      const res = await fetch(`${service}/api/widget/session`, {method:'POST',headers:{'Content-Type':'application/json'},credentials:'omit',body:JSON.stringify({siteId,visitorToken:identityToken ? undefined : anonymousToken,identityToken,page:location.href})});
       const data = await res.json();
+      if (revision !== bootstrapRevision) return;
       if (!res.ok) throw new Error(data.error || '客服暂时不可用');
-      session = data;visitorToken = data.visitorToken;
-      try { localStorage.setItem(key, visitorToken); } catch { /* works without persistence */ }
+      if (session && session.conversationId !== data.conversationId) tell('reset');
+      session = data;
+      if (!data.identity) { anonymousToken = data.visitorToken; try { localStorage.setItem(key,anonymousToken); } catch { /* works without persistence */ } }
       launcher.style.setProperty('--widget-accent',data.site.color);const rgb=data.site.color.slice(1).match(/../g).map(v=>parseInt(v,16));launcher.style.setProperty('--widget-ink',rgb[0]*.299+rgb[1]*.587+rgb[2]*.114>155?'#233238':'#fff');error.hidden = true;initialize();
-    } catch (e) { error.textContent = `客服连接失败：${e.message}。点击图标重试。`; if (opened) error.hidden = false; console.error('[Kivo]', e.message); }
-    finally { booting = false; }
+    } catch (e) {
+      if (revision !== bootstrapRevision) return;
+      if (identityPath) {session=null;tell('reset');}
+      error.textContent = `客服连接失败：${e.message}。点击图标重试。`;if(opened)error.hidden=false;console.error('[Kivo]',e.message);
+    } finally { if (revision === bootstrapRevision) booting = false; }
   }
+  window.Kivo = {...window.Kivo,refreshIdentity:()=>bootstrap(true)};
   function setOpen(value) {
     opened = value;panel.hidden = !value;badge.hidden = true;error.hidden = true;
     launcher.dataset.open=String(value);launcher.setAttribute('aria-expanded', String(value));launcher.setAttribute('aria-label', value ? '关闭在线客服' : '打开在线客服');
@@ -47,6 +68,7 @@
   launcher.onclick = () => setOpen(!opened);
   window.addEventListener('message', event => {
     if (event.source !== frame.contentWindow || event.origin !== service || !event.data?.kivo) return;
+    if (event.data.type === 'identity-expired' && identityPath) bootstrap();
     if (event.data.type === 'ready') { ready = true;initialize(); }
     if (event.data.type === 'close') { setOpen(false);launcher.focus(); }
     if (event.data.type === 'unread' && !opened) badge.hidden = false;
@@ -54,6 +76,10 @@
   window.addEventListener('keydown', e => { if (e.key === 'Escape' && opened) setOpen(false); });
   const mount = () => { document.body.append(host);bootstrap(); };
   if (document.body) mount(); else document.addEventListener('DOMContentLoaded', mount, { once:true });
+  if (identityPath) {
+    setInterval(()=>bootstrap(),60000);
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)bootstrap();});
+  }
   // Polling also catches SPA navigation without modifying the host's router.
   setInterval(() => { if (lastPage !== location.href) { lastPage = location.href;tell('page', { page:lastPage }); } }, 2000);
 })();
