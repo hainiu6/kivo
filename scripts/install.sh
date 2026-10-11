@@ -1,76 +1,69 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
-REPO_URL="${KIVO_REPO_URL:-https://github.com/panhui/Kivo.git}"
-INSTALL_DIR="${KIVO_INSTALL_DIR:-/opt/kivo}"
-if [[ $EUID -ne 0 ]]; then echo '请使用 sudo bash 运行安装脚本。' >&2; exit 1; fi
-if [[ ! -r /etc/os-release ]]; then echo '需要 Debian 12 或 13。' >&2; exit 1; fi
-. /etc/os-release
-if [[ "$ID" != debian || ! "$VERSION_ID" =~ ^(12|13)$ ]]; then echo '支持 Debian 12 / 13。' >&2; exit 1; fi
-if [[ -e "$INSTALL_DIR" && -n "$(ls -A "$INSTALL_DIR")" ]]; then
-  echo "安装目录已存在，请运行：sudo bash $INSTALL_DIR/scripts/upgrade.sh" >&2; exit 1
+ROOT="${KIVO_INSTALL_DIR:-/opt/kivo}"
+[[ "$ROOT" =~ ^/[a-zA-Z0-9_./-]+$ && "$ROOT" != / ]] || { echo '安装目录须为不含空格的绝对路径，且不能为 /。' >&2; exit 1; }
+[[ $EUID -eq 0 ]] || { echo '请在 root 终端运行，或使用 sudo bash。' >&2; exit 1; }
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+SCRIPT_BASE="${KIVO_SCRIPT_BASE:-https://raw.githubusercontent.com/panhui/Kivo/main/scripts}"
+curl -fsSL --retry 3 "$SCRIPT_BASE/lib-docker.sh" -o "$WORK/lib-docker.sh"
+. "$WORK/lib-docker.sh"
+kivo_host_check
+if [[ -f "$ROOT/.env" && ! -f "$ROOT/deployment.env" && -d "$ROOT/.git" ]]; then
+  kivo_error '检测到旧版 Compose 安装。请使用原部署目录的升级脚本；Docker 镜像版可通过 KIVO_INSTALL_DIR 选择一个新目录。'
 fi
-apt_install() {
-  if apt-get install -y "$@"; then return 0; fi
-  echo '系统软件包安装失败，Kivo 安装尚未完成。请先修复上面的 apt / dpkg 错误，再重新运行安装脚本。' >&2
-  if [[ ! -e /etc/mysql/mariadb.cnf ]] && dpkg-query -W -f='${Status}' mariadb-common 2>/dev/null | grep -Eq '^(install|hold) ok (installed|unpacked|half-configured)$'; then
-    cat >&2 <<'EOF'
-检测到已有 MariaDB 软件包缺少 /etc/mysql/mariadb.cnf。Kivo 使用 SQLite，不依赖 MariaDB。
-可在 root 终端恢复 mariadb-common 软件包中的缺失配置，再完成待配置软件包：
-  apt-get --no-remove -o Dpkg::Options::="--force-confmiss" install --reinstall mariadb-common
-  dpkg --configure -a
-  apt-get --no-remove -f install
-这些命令不卸载 MariaDB；安装脚本不会自动修改已有数据库配置。
-EOF
-  else
-    echo '可先运行 dpkg --audit 查看尚未完成配置的软件包。' >&2
-  fi
-  exit 1
+mkdir -p "$ROOT"
+exec 9>"$ROOT/.install.lock"
+flock -n 9 || kivo_error '另一个安装正在运行。'
+kivo_fetch_bundle "$WORK"
+if [[ ! -f "$ROOT/runtime.env" ]]; then ROOT="$ROOT" bash "$BUNDLE/scripts/install-runtime.sh"; fi
+kivo_docker_init
+if [[ -f "$ROOT/deployment.env" ]]; then echo "已有 Docker 镜像版安装，请运行：bash $ROOT/scripts/upgrade.sh" >&2; exit 1; fi
+CONTAINER="${KIVO_CONTAINER:-kivo}"
+[[ "$CONTAINER" =~ ^kivo[a-zA-Z0-9_.-]*$ ]] || kivo_error '容器名称必须以 kivo 开头，仅可包含字母、数字、点、下划线和连字符。'
+if kivo_docker inspect "$CONTAINER" >/dev/null 2>&1; then kivo_error "容器 $CONTAINER 已存在，不会覆盖；请指定其他 KIVO_CONTAINER，或先检查原容器。"; fi
+port_busy() {
+  local hex
+  # Docker may publish via NAT without a listening userspace process.
+  if kivo_docker ps --format '{{.Ports}}' | awk -v port="$1" 'index($0,":" port "->") {found=1} END{exit !found}'; then return 0; fi
+  hex="$(printf '%04X' "$1")"
+  awk -v port="$hex" 'NR>1 {split($2,a,":");if(toupper(a[2])==port && $4=="0A") found=1} END{exit !found}' /proc/net/tcp /proc/net/tcp6
 }
-echo '→ 安装系统依赖'
-apt-get update
-apt_install ca-certificates curl git openssl
-if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
-  echo '→ 从 Docker 官方 Debian 软件源安装 Docker 和 Compose'
-  if dpkg-query -W -f='${Status}' docker.io 2>/dev/null | grep -q 'install ok installed'; then
-    echo '检测到 docker.io；请先安装兼容的 Docker Compose v2，避免自动替换已有 Docker。' >&2; exit 1
+if [[ ! -f "$ROOT/.env" ]]; then
+  HTTP_PORT="${KIVO_PORT:-8088}"
+  [[ "$HTTP_PORT" =~ ^[0-9]{4,5}$ ]] && ((HTTP_PORT >= 1024 && HTTP_PORT <= 65535)) || kivo_error 'KIVO_PORT 须在 1024–65535 之间。'
+  if [[ -n "${KIVO_PORT:-}" ]]; then
+    port_busy "$HTTP_PORT" && kivo_error "端口 $HTTP_PORT 已被占用；请指定其他 KIVO_PORT。"
+  else
+    while port_busy "$HTTP_PORT"; do ((HTTP_PORT+=1)); ((HTTP_PORT <= 8107)) || kivo_error '8088–8107 都被占用，请指定 KIVO_PORT。'; done
   fi
-  install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-  chmod a+r /etc/apt/keyrings/docker.asc
-  cat > /etc/apt/sources.list.d/docker.sources <<EOF
-Types: deb
-URIs: https://download.docker.com/linux/debian
-Suites: ${VERSION_CODENAME}
-Components: stable
-Architectures: $(dpkg --print-architecture)
-Signed-By: /etc/apt/keyrings/docker.asc
-EOF
-  apt-get update
-  apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  PASSWORD="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+  SERVER_IP="$(hostname -I | awk '{print $1}')"
+  [[ "$SERVER_IP" == *:* ]] && SERVER_IP="[$SERVER_IP]"
+  PUBLIC_URL="${KIVO_PUBLIC_URL:-http://${SERVER_IP:-127.0.0.1}:$HTTP_PORT}"
+  [[ "$PUBLIC_URL" =~ ^https?://[^[:space:]/?#@]+/?$ ]] || kivo_error 'KIVO_PUBLIC_URL 须为 http(s)://域名或IP:端口，不含路径、账号或查询参数。'
+  printf 'PUBLIC_URL=%s\nADMIN_USERNAME=admin\nADMIN_PASSWORD=%s\nHTTP_PORT=%s\nBIND_HOST=%s\nTRUST_PROXY=0\n' "${PUBLIC_URL%/}" "$PASSWORD" "$HTTP_PORT" "${KIVO_BIND_HOST:-0.0.0.0}" > "$ROOT/.env"
+  chmod 600 "$ROOT/.env"
 fi
-systemctl enable --now docker
-echo '→ 获取 Kivo'
-git clone --branch main "$REPO_URL" "$INSTALL_DIR"
-cd "$INSTALL_DIR"
-mkdir -p data backups
-chown 1000:1000 data
-chmod 700 data backups
-PASSWORD="$(openssl rand -hex 16)"
-SERVER_IP="$(hostname -I | awk '{print $1}')"
-PUBLIC_ADDRESS="${KIVO_PUBLIC_URL:-http://${SERVER_IP:-127.0.0.1}:8080}"
-SITE=':80'
-HTTP_PORT=8080
-if [[ -n "${KIVO_DOMAIN:-}" ]]; then
-  if [[ ! "$KIVO_DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then echo 'KIVO_DOMAIN 必须为有效域名，不包含协议或路径。' >&2; exit 1; fi
-  PUBLIC_ADDRESS="https://$KIVO_DOMAIN"; SITE="$KIVO_DOMAIN"; HTTP_PORT=80
+mkdir -p "$ROOT/data" "$ROOT/backups"
+chown 1000:1000 "$ROOT/data"
+chmod 700 "$ROOT/data" "$ROOT/backups"
+kivo_container_config
+# Preserve the custom name during first installation (no deployment.env yet).
+CONTAINER="${KIVO_CONTAINER:-kivo}"
+echo '→ 导入镜像（服务器无需 npm、Git、Compose）'
+kivo_docker load -i "$BUNDLE/image.tar"
+echo "→ 启动客服容器，使用端口 $HTTP_PORT"
+if CID="$(kivo_run "$IMAGE")"; then :; else
+  if kivo_managed "$CONTAINER"; then kivo_docker rm -f "$CONTAINER" >/dev/null || true; fi
+  kivo_error '容器创建失败，配置和数据已保留，请解决上述错误后重新运行安装脚本。'
 fi
-if [[ ! "$PUBLIC_ADDRESS" =~ ^https?://[^[:space:]/]+/?$ ]]; then echo 'KIVO_PUBLIC_URL 必须为有效的 http(s)://主机:端口，不能含路径。' >&2; exit 1; fi
-printf 'PUBLIC_URL=%s\nADMIN_USERNAME=admin\nADMIN_PASSWORD=%s\nHTTP_PORT=%s\nHTTPS_PORT=443\nCADDY_SITE=%s\n' "${PUBLIC_ADDRESS%/}" "$PASSWORD" "$HTTP_PORT" "$SITE" > .env
-chmod 600 .env
-echo '→ 构建并启动（首次需要下载镜像和依赖）'
-docker compose config --quiet
-docker compose up -d --build --wait --wait-timeout 180
-curl --fail --silent --show-error --retry 8 --retry-delay 2 --retry-connrefused "http://127.0.0.1:$HTTP_PORT/healthz" >/dev/null
-printf '\nKivo 已安装\n工作台：%s\n账号：admin\n初始密码：%s\n配置文件：%s/.env\n升级：sudo bash %s/scripts/upgrade.sh\n' "$PUBLIC_ADDRESS" "$PASSWORD" "$INSTALL_DIR" "$INSTALL_DIR"
-echo '如果服务器在 NAT 后，请将 .env 中 PUBLIC_URL 改为实际访问地址。建议使用域名启用 HTTPS。'
+if ! kivo_wait "$CID"; then
+  echo "启动失败。配置与数据已保留，请查看上面的容器日志。解决错误后可重新运行安装脚本。" >&2
+  kivo_docker rm -f "$CID" >/dev/null
+  exit 1
+fi
+kivo_save_release
+printf '\nKivo Docker 镜像版已安装\n工作台：%s\n账号：%s\n初始密码：%s\n升级：bash %s/scripts/upgrade.sh\n备份：bash %s/scripts/backup.sh\n' "$(kivo_get "$ROOT/.env" PUBLIC_URL)" "$(kivo_get "$ROOT/.env" ADMIN_USERNAME)" "$(kivo_get "$ROOT/.env" ADMIN_PASSWORD)" "$ROOT" "$ROOT"
+echo '安装器未调用 apt，也未更改服务器已有 MariaDB / Node.js / Nginx 配置。请在防火墙中放行上面显示的端口。'

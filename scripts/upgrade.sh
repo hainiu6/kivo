@@ -2,34 +2,45 @@
 set -Eeuo pipefail
 umask 077
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
-exec 9>"$ROOT/.git/kivo-upgrade.lock"
-flock -n 9 || { echo '另一个升级正在运行。' >&2; exit 1; }
-if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then echo '代码有本地修改，请先保存修改后再升级。数据和 .env 不受影响。' >&2; exit 1; fi
-if [[ "$(git branch --show-current)" != main ]]; then echo '部署目录必须在 main 分支。' >&2; exit 1; fi
-OLD_REV="$(git rev-parse HEAD)"
-echo '→ 升级前备份数据库与配置'
-bash scripts/backup.sh
-echo '→ 获取最新版本'
-git fetch origin main
-# Require linear updates. No silent reset of a locally modified deployment.
-git merge --ff-only origin/main
+if [[ ! -f "$ROOT/deployment.env" ]]; then exec bash "$ROOT/scripts/upgrade-compose.sh"; fi
+. "$ROOT/scripts/lib-docker.sh"
+kivo_host_check
+exec 9>"$ROOT/.upgrade.lock"
+flock -n 9 || kivo_error '另一个升级正在运行。'
+kivo_docker_init
+kivo_container_config
+kivo_managed "$CONTAINER" || kivo_error '拒绝操作非 Kivo 管理的容器。'
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+# Download and import before interrupting the old container.
+kivo_fetch_bundle "$WORK"
+kivo_docker load -i "$BUNDLE/image.tar"
+echo '→ 升级前在线备份数据库与配置'
+bash "$ROOT/scripts/backup.sh"
+PREVIOUS="$CONTAINER-previous-$(date +%s)-$$"
+OLD_VERSION="$(kivo_get "$ROOT/deployment.env" KIVO_VERSION)"
+NEW_CID=''
 rollback() {
   trap - ERR
-  echo '升级失败，恢复升级前代码并重新启动。数据库备份位于 backups/。' >&2
-  git checkout --detach "$OLD_REV"
-  if docker compose up -d --build --force-recreate --wait --wait-timeout 180; then
-    git checkout -B main "$OLD_REV"
-    echo '旧版本已恢复。' >&2
+  echo '升级失败，正在恢复旧容器；聊天数据和备份已保留。' >&2
+  if kivo_docker inspect "$PREVIOUS" >/dev/null 2>&1; then
+    # docker run may create a container before failing to start it (e.g. a busy port).
+    if kivo_managed "$CONTAINER"; then kivo_docker rm -f "$CONTAINER" >/dev/null || true; fi
+    kivo_docker rename "$PREVIOUS" "$CONTAINER"
+    kivo_docker start "$CONTAINER" >/dev/null
+    kivo_wait "$CONTAINER" || echo '旧容器未通过健康检查，请查看日志及备份。' >&2
   else
-    echo '自动恢复未成功，请查看 docker compose logs；数据库升级若不兼容，请按 README 从升级前备份恢复。' >&2
+    kivo_docker start "$CONTAINER" >/dev/null || true
   fi
   exit 1
 }
+echo '→ 替换客服容器'
 trap rollback ERR
-docker compose config --quiet
-echo '→ 构建并重启服务'
-docker compose up -d --build --force-recreate --wait --wait-timeout 180
-docker compose exec -T app node -e "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+kivo_docker stop "$CONTAINER" >/dev/null
+kivo_docker rename "$CONTAINER" "$PREVIOUS"
+if NEW_CID="$(kivo_run "$IMAGE")"; then :; else rollback; fi
+kivo_wait "$NEW_CID"
+kivo_save_release
 trap - ERR
-printf '升级完成：%s → %s\n' "${OLD_REV:0:7}" "$(git rev-parse --short HEAD)"
+kivo_docker rm "$PREVIOUS" >/dev/null
+printf '升级完成：%s → %s\n' "$OLD_VERSION" "$RELEASE_VERSION"

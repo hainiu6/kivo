@@ -1,0 +1,66 @@
+name: Docker release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag (e.g. v1.1.0); must be new'
+        required: true
+        default: v1.1.0
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci && npm run check && npm test && npm audit --omit=dev
+      - name: Build image and test Debian 10 deployment
+        env:
+          VERSION: ${{ inputs.version || github.ref_name }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          [[ "$VERSION" =~ ^v[0-9][a-zA-Z0-9._-]*$ ]]
+          IMAGE="kivo/app:${VERSION#v}-${GITHUB_SHA:0:7}-$ARCH"
+          docker build -t "$IMAGE" .
+          sudo bash test/docker-deploy.sh "$IMAGE" "$ARCH" "$GITHUB_SHA"
+          bash scripts/package-release.sh "$VERSION" "$ARCH" "$IMAGE" "$GITHUB_SHA" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kivo-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          retention-days: 7
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish verified bundles
+        env:
+          VERSION: ${{ inputs.version || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS
+          printf '%s\n' "$VERSION" > version.txt
+          printf 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。\n\n服务器无需 apt、Git、npm 或 Compose。安装与升级命令见仓库 README。升级前自动备份，健康检查失败恢复旧容器。两个架构均通过 Debian 10 用户空间的安装、升级、数据保留、端口冲突与失败回退测试（CI 主机内核）。\n' > release-notes.md
+          gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md
