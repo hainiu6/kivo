@@ -6,7 +6,7 @@
   async function imageUrl(id, headers) {
     if (!images.has(id)) {
       const promise=fetch(`/api/media/${encodeURIComponent(id)}`,{headers,credentials:'same-origin'}).then(async r=>{if(!r.ok)throw new Error('图片加载失败');return URL.createObjectURL(await r.blob());});
-      images.set(id,promise);promise.catch(()=>images.delete(id));
+      images.set(id,promise);promise.catch(()=>{if(images.get(id)===promise)images.delete(id);});
       // Keep URLs for the displayed conversation until it changes. Revoking
       // an evicted URL can race with its image load or break the zoom viewer.
       // Server-side image storage is capped at 50 MB per conversation.
