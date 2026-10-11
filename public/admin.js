@@ -157,7 +157,7 @@ $('#message-input').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposin
 $('#message-form').onsubmit=e=>{
   e.preventDefault();if(!activeId||loadingMessages||sending)return;const body=$('#message-input').value.trim();if(!body)return;
   if(!socket?.connected){$('#send-error').textContent='连接已断开，请等待重新连接后发送';return;}
-  const id=activeId;const clientId=crypto.randomUUID();sending=true;$('#send-message').disabled=true;$('#send-error').textContent='';
+  const id=activeId;const clientId=window.kivoMessageId();sending=true;$('#send-message').disabled=true;$('#send-error').textContent='';
   socket.timeout(8000).emit('message:send',{conversationId:id,body,clientId},(error,result)=>{
     sending=false;$('#send-message').disabled=!socket.connected;
     if(error||!result?.ok){$('#send-error').textContent=error?'未收到发送确认，请刷新检查聊天记录后重试':result.error;return;}

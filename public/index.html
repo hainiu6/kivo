@@ -20,5 +20,5 @@
     </main>
   </div>
   <dialog id="site-dialog"><form id="site-form"><div class="dialog-heading"><h2 id="site-form-title">添加网站</h2><button type="button" id="close-dialog" class="icon-button" aria-label="关闭">×</button></div><input type="hidden" name="id"><label>网站名称<input name="name" placeholder="例如：我的官方网站" maxlength="60" required></label><label>允许来源（每行一个）<textarea name="origins" placeholder="https://www.example.com&#10;https://example.com" rows="3" required></textarea></label><p class="field-help">填写完整协议和域名；端口也必须一致。不需要添加页面路径。</p><div class="color-field"><label>图标颜色<input name="color" type="color" value="#0f766e"></label><span>与网站的品牌色保持一致</span></div><label>欢迎语<textarea name="greeting" maxlength="300" rows="2">你好，欢迎联系我们！有什么可以帮你？</textarea></label><p id="site-error" class="error" role="alert"></p><button class="button primary" type="submit">保存网站</button></form></dialog>
-  <div id="toast" class="toast" role="status" hidden></div><script src="/socket.io/socket.io.js" defer></script><script src="/admin.js" defer></script>
+  <div id="toast" class="toast" role="status" hidden></div><script src="/message-id.js" defer></script><script src="/socket.io/socket.io.js" defer></script><script src="/admin.js" defer></script>
 </body></html>

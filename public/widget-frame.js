@@ -41,7 +41,7 @@ $('message-form').onsubmit=e=>{
   e.preventDefault();if(sending)return;const body=$('message-input').value.trim();if(!body)return;
   if(!socket?.connected){error('连接已断开，请稍后再试。');return;}
   sending=true;$('send').disabled=true;error('');
-  socket.timeout(8000).emit('message:send',{body,clientId:crypto.randomUUID()},(err,result)=>{
+  socket.timeout(8000).emit('message:send',{body,clientId:window.kivoMessageId()},(err,result)=>{
     sending=false;$('send').disabled=!socket.connected;
     if(err||!result?.ok){error(err?'未收到发送确认，请查看聊天记录后重试。':result.error);return;}
     add(result.message);if($('message-input').value.trim()===body)$('message-input').value='';$('messages').scrollTop=$('messages').scrollHeight;
