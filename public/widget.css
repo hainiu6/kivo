@@ -2,4 +2,6 @@
 
 textarea:focus-visible{outline:none}
 
+#restart-conversation{border:1px solid var(--accent);border-radius:8px;background:#fff;color:var(--accent);padding:10px 15px;margin:8px 14px;font-size:14px;align-self:flex-start}
+
 :root{font-size:16px}h1{font-size:18px}header p{font-size:12px}h2{font-size:18px}.welcome p{font-size:15px}.bubble{font-size:16px;line-height:1.75}.meta{font-size:11px}.message-avatar{width:34px;height:34px}.message-content{max-width:calc(100% - 42px)}textarea{font-size:16px;min-height:72px}.sticker-message p{font-size:16px}#error{font-size:13px}.keyboard-help{font-size:10px}.form-bottom>#send{width:42px;height:42px}

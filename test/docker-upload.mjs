@@ -35,6 +35,14 @@ if (process.argv[2] !== 'verify') {
   await upload('/api/widget/images', { Authorization: 'Bearer ' + visitor.visitorToken, 'X-Kivo-Site': site.id });
   await upload(`/api/admin/conversations/${visitor.conversationId}/images`, { Cookie: login.cookie });
   await upload('/api/admin/avatar', {}, 401);
+  const {data: disposable}=await json('/api/widget/session',{siteId:site.id,page:'https://shop.example/cleanup'},'','https://shop.example');
+  const removable=await upload(`/api/admin/conversations/${disposable.conversationId}/images`,{Cookie:login.cookie});
+  const remove=route=>fetch(base+route,{method:'DELETE',headers:{Origin:origin,Cookie:login.cookie}});
+  assert.equal((await remove(`/api/admin/conversations/${disposable.conversationId}/messages`)).status,200);
+  assert.equal((await fetch(base+'/api/media/'+removable.id,{headers:{Cookie:login.cookie}})).status,404);
+  await assert.rejects(readFile('/app/data/media/'+removable.id+'.webp'),{code:'ENOENT'});
+  assert.equal((await remove(`/api/admin/conversations/${disposable.conversationId}`)).status,200);
+  assert.equal((await fetch(base+`/api/admin/conversations/${disposable.conversationId}/messages`,{headers:{Cookie:login.cookie}})).status,404);
 }
 const db = new DatabaseSync('/app/data/kivo.sqlite', { readOnly: true });
 const account=db.prepare('SELECT u.*,i.secret FROM website_users u JOIN site_identity i ON u.site_id=i.site_id WHERE u.user_id=?').get('docker-user');
@@ -54,4 +62,4 @@ for (const item of media) {
   assert.deepEqual(downloaded, await readFile('/app/data/media/' + item.id + '.webp'));
 }
 db.close();
-console.log('Container multipart upload, account identity, authentication and persisted media passed.');
+console.log('Container uploads, history deletion, account identity, authentication and persisted media passed.');

@@ -27,3 +27,23 @@ test('session-name embed makes no identity request and isolates browser credenti
   assert.notEqual(aliceToken,anonymousToken);
   assert.equal((await run('x'.repeat(127)+'😊')).visitorName,'x'.repeat(127),'long Unicode names do not leave a split surrogate');
 });
+
+test('deleting a conversation invalidates anonymous credentials and suppresses background account refresh until visitor action',async()=>{
+  for(const signed of [false,true]){
+    const nodes=[],listeners={},documentListeners={},intervals=[],requests=[],key='kivo:https://chat.example:site-id',storage=new Map([[key,'old-visitor-token']]);
+    const element=tag=>{const node={tag,dataset:{},style:{setProperty(){}},append(){},setAttribute(){},focus(){},attachShadow(){return{append(){}};},contentWindow:{postMessage(){}}};nodes.push(node);return node;};
+    let sequence=0;
+    const context={URL,console,location:{href:'https://shop.example/user',origin:'https://shop.example'},window:{addEventListener:(name,handler)=>{listeners[name]=handler;}},document:{currentScript:{src:'https://chat.example/widget.js',getAttribute:name=>({'data-site':'site-id','data-identity-url':signed?'/identity':null})[name]},body:{append(){}},createElement:element,addEventListener:(name,handler)=>{documentListeners[name]=handler;},hidden:false},setInterval:(handler,ms)=>intervals.push({handler,ms}),localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},fetch:async(url,options)=>{
+      requests.push({url,body:options.body&&JSON.parse(options.body)});
+      return{ok:true,json:async()=>url.endsWith('/identity')?{identityToken:'signed-identity'}:{conversationId:String(++sequence),visitorToken:signed?'signed-identity':'new-token-'+sequence,identity:signed?{verified:true}:null,site:{id:'site-id',color:'#0f766e'}}};
+    }};
+    vm.runInNewContext(source,context);await new Promise(resolve=>setImmediate(resolve));
+    const frame=nodes.find(n=>n.tag==='iframe'),notify=type=>listeners.message({source:frame.contentWindow,origin:'https://chat.example',data:{kivo:true,type}}),before=requests.length;
+    notify('conversation-deleted');
+    assert.equal(storage.get(key),signed?'old-visitor-token':undefined,'only deleted anonymous credentials are discarded');
+    if(signed){intervals.find(i=>i.ms===60000).handler();documentListeners.visibilitychange();}
+    await new Promise(resolve=>setImmediate(resolve));assert.equal(requests.length,before,'automatic refresh must not recreate a deleted conversation');
+    notify('restart-conversation');await new Promise(resolve=>setImmediate(resolve));assert.ok(requests.length>before);
+    assert.equal(requests.at(-1).body.visitorToken,undefined,'fresh conversation does not reuse a deleted visitor credential');
+  }
+});

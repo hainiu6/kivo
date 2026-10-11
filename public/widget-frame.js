@@ -3,6 +3,8 @@ const $ = id => document.getElementById(id);
 let socket, parentOrigin, currentPage, initialized = false, opened = false, rows = [], sending = false;
 let conversationId, generation=0, hasIdentity=false;
 let visitorToken, supportName='在线客服', avatarUrl='/support-avatar.svg';
+let deletedMessageIds=new Set(), clearedThroughId=0;
+const visibleMessage=m=>m.id>clearedThroughId&&!deletedMessageIds.has(m.id);
 const siteId = new URLSearchParams(location.search).get('site');
 const authHeaders = () => ({Authorization:`Bearer ${visitorToken}`,'X-Kivo-Site':siteId});
 const composer = KivoChat.composer({form:$('message-form'),input:$('message-input'),tools:$('chat-tools'),preview:$('attachment-preview'),dropTarget:document.body,getContext:()=>socket?.connected&&!sending?siteId:'',uploadUrl:()=>'/api/widget/images',headers:authHeaders,onError:error,onSubmitLock:locked=>$('send').disabled=locked||sending||!socket?.connected});
@@ -20,10 +22,10 @@ function render() {
   });
   if(nearBottom)$('messages').scrollTop=$('messages').scrollHeight;
 }
-function add(m) { if(rows.some(r=>r.id===m.id))return;rows.push(m);rows.sort((a,b)=>a.id-b.id);render();if(m.sender!=='visitor'&&!opened)tell('unread'); }
+function add(m) { if(!visibleMessage(m)||rows.some(r=>r.id===m.id))return;rows.push(m);rows.sort((a,b)=>a.id-b.id);render();if(m.sender!=='visitor'&&!opened)tell('unread'); }
 function reset() {
   generation++;socket?.removeAllListeners();socket?.disconnect();socket=null;initialized=false;sending=false;rows=[];visitorToken=undefined;conversationId=null;hasIdentity=false;
-  composer.clear();composer.closePicker();KivoChat.clearImages();$('message-items').replaceChildren();$('message-input').value='';$('message-input').disabled=true;$('send').disabled=true;error('');
+  deletedMessageIds=new Set();clearedThroughId=0;composer.clear();composer.closePicker();KivoChat.clearImages();$('message-items').replaceChildren();$('message-input').value='';$('message-input').disabled=true;$('send').disabled=true;$('restart-conversation').hidden=true;error('');
 }
 function initialize(data, origin) {
   if(data.site?.id!==siteId||origin!==data.parentOrigin)return;
@@ -42,8 +44,11 @@ function initialize(data, origin) {
   socket.on('disconnect',reason=>{if(hasIdentity&&reason==='io server disconnect')tell('identity-expired');$('agent-status').textContent='连接已断开，正在重连…';$('send').disabled=true;});
   socket.on('connect_error',()=>{if(hasIdentity)tell('identity-expired');$('agent-status').textContent='暂时无法连接';error('连接暂时不可用，正在自动重试。');$('send').disabled=true;});
   socket.on('agents:status',data=>$('agent-status').textContent=data.online?'● 客服在线，随时为你服务':'○ 客服暂时离线，请留言，我们会尽快回复');
-  socket.on('history',messages=>{rows=messages;render();$('messages').scrollTop=$('messages').scrollHeight;});
+  socket.on('history',messages=>{rows=messages.filter(visibleMessage);render();$('messages').scrollTop=$('messages').scrollHeight;});
   socket.on('message:new',add);
+  socket.on('message:deleted',data=>{if(data.conversationId!==conversationId)return;deletedMessageIds.add(data.messageId);rows=rows.filter(visibleMessage);KivoChat.forgetImages(data.mediaIds);render();});
+  socket.on('history:cleared',data=>{if(data.conversationId!==conversationId)return;clearedThroughId=Math.max(clearedThroughId,data.throughId);rows=rows.filter(visibleMessage);composer.clear();KivoChat.clearImages();$('message-input').value='';render();});
+  socket.on('conversation:deleted',data=>{if(data.conversationId!==conversationId)return;reset();$('agent-status').textContent='对话记录已删除';error('客服已删除这段会话记录。你可以开始新对话。');$('restart-conversation').hidden=false;tell('conversation-deleted');});
 }
 window.addEventListener('message',event=>{
   if(event.source!==parent||!event.data?.kivo)return;
@@ -54,6 +59,7 @@ window.addEventListener('message',event=>{
   if(event.data.type==='visibility'){opened=!!event.data.opened;if(opened){$('messages').scrollTop=$('messages').scrollHeight;$('message-input').focus();}}
 });
 $('close').onclick=()=>tell('close');document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!e.defaultPrevented&&!document.querySelector('dialog[open]'))tell('close');});
+$('restart-conversation').onclick=()=>{$('restart-conversation').hidden=true;$('agent-status').textContent='正在连接…';error('');tell('restart-conversation');};
 $('message-input').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();$('message-form').requestSubmit();}};
 $('message-form').onsubmit=e=>{
   e.preventDefault();if(sending||composer.isUploading())return;const body=$('message-input').value.trim();if(!body&&!composer.hasAttachment())return;

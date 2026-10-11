@@ -79,9 +79,18 @@ location / {
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Real-IP $remote_addr;
     proxy_read_timeout 300s;
 }
 ```
+
+访客 IP 显示 `172.17.0.1` 等 Docker 网关地址时，先确认宝塔反向代理包含上述 `X-Forwarded-For` / `X-Real-IP` 配置，再把 `.env` 的 `TRUST_PROXY` 设为 `1`、`BIND_HOST` 设为 `127.0.0.1`，运行升级脚本重新创建容器。不要只执行 `docker restart`，它不会载入修改后的环境变量。浏览器刷新或重连后，IP 和地区将按当前连接更新。
+
+## 删除聊天记录
+
+v1.5.0 支持消息旁的「删除」、当前会话的「清空记录」和「删除会话」，以及会话列表顶部的「批量删除」。可删除全部、7 天前或一个月前（30 天）的会话；时间按最近消息计算，批量删除可限定当前所选网站，并覆盖所有状态及列表外的会话。确认窗口会显示删除数量。
+
+删除会同步到在线访客窗口及其他客服，并清理相关图片；完整会话删除后，访客可以开始新对话。详细行为与截图见 [记录管理](docs/history-management.md)。
 
 `TRUST_PROXY=1` 仅用于这一层可信代理；应用同时绑定回环地址。存在 CDN / 多层代理时，应按你的代理链配置可信来源和真实 IP。直接 IP 访问使用 `TRUST_PROXY=0`。
 

@@ -2,7 +2,10 @@
 (function () {
   const images = new Map();
   const el = (tag, cls, text) => { const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n; };
-  function clearImages() { for(const entry of images.values())entry.then(url=>URL.revokeObjectURL(url)).catch(()=>{});images.clear(); }
+  function forgetImages(ids=[]) {
+    for(const id of ids){const entry=images.get(id);images.delete(id);entry?.then(url=>{document.querySelectorAll?.('.image-viewer').forEach(dialog=>{if(dialog.querySelector('img')?.src===url)dialog.close();});URL.revokeObjectURL(url);}).catch(()=>{});}
+  }
+  function clearImages() { document.querySelectorAll?.('.image-viewer').forEach(dialog=>dialog.close());forgetImages([...images.keys()]); }
   async function imageUrl(id, headers) {
     if (!images.has(id)) {
       const promise=fetch(`/api/media/${encodeURIComponent(id)}`,{headers,credentials:'same-origin'}).then(async r=>{if(!r.ok)throw new Error('图片加载失败');return URL.createObjectURL(await r.blob());});
@@ -114,5 +117,5 @@
     return { clear, payload:()=>attachment?{kind:attachment.kind,...(attachment.mediaId?{mediaId:attachment.mediaId}:{stickerId:attachment.stickerId})}:{kind:'text'}, hasAttachment:()=>!!attachment, isUploading:()=>uploading, closePicker:()=>toggle(false), destroy:()=>{clear();clearDrag();toggle(false);} };
   }
   const contrast = color => {const rgb=color.replace('#','').match(/../g)?.map(v=>parseInt(v,16))||[0,0,0];return rgb[0]*.299+rgb[1]*.587+rgb[2]*.114>155?'#233238':'#fff';};
-  window.KivoChat = { composer,renderMessage,clearImages,contrast,uploadImage };
+  window.KivoChat = { composer,renderMessage,clearImages,forgetImages,contrast,uploadImage };
 })();

@@ -6,6 +6,8 @@ let loadingMessages = false, sending = false, toastTimer;
 let pendingMessages = [];
 let replies = [];
 let avatarUploading=false, avatarRevision=0;
+let clearedThroughId=0, deletedMessageIds=new Set(), deletePlan, deleteRevision=0, deleting=false;
+const visibleMessage = m => m.id>clearedThroughId&&!deletedMessageIds.has(m.id);
 const composer = KivoChat.composer({form:$('#message-form'),input:$('#message-input'),tools:$('#chat-tools'),preview:$('#attachment-preview'),dropTarget:$('#chat-active'),getContext:()=>socket?.connected&&!loadingMessages&&!sending?activeId:'',uploadUrl:id=>`/api/admin/conversations/${id}/images`,onError:message=>$('#send-error').textContent=message,onSubmitLock:locked=>$('#send-message').disabled=locked||sending||loadingMessages||!socket?.connected});
 const drafts = new Map();
 const date = ms => new Date(ms).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -19,7 +21,7 @@ async function api(url, options = {}) {
   return data;
 }
 const post = (url, data = {}) => api(url,{method:'POST',body:JSON.stringify(data)});
-function showLogin() { $('#identity-dialog').close(); $('#identity-secret').value=''; $('#site-dialog').close(); socket?.disconnect(); composer.destroy(); KivoChat.clearImages(); $('#workspace').hidden = true; $('#login-screen').hidden = false; activeId = null; $('#chat-empty').hidden = false; $('#chat-active').hidden = true; $('#visitor-empty').hidden = false; $('#visitor-details').hidden = true; }
+function showLogin() { $('#delete-dialog').close(); $('#identity-dialog').close(); $('#identity-secret').value=''; $('#site-dialog').close(); socket?.disconnect(); composer.destroy(); KivoChat.clearImages(); $('#workspace').hidden = true; $('#login-screen').hidden = false; activeId = null; $('#chat-empty').hidden = false; $('#chat-active').hidden = true; $('#visitor-empty').hidden = false; $('#visitor-details').hidden = true; }
 function switchView(next) {
   view = next; ['inbox','sites','replies','settings'].forEach(v => $(`#view-${v}`).hidden = v !== next);
   $('#workspace').classList.toggle('inbox-mode', next === 'inbox');
@@ -57,6 +59,22 @@ async function start() {
     }
   });
   socket.on('replies:update', rows => { replies = rows; renderQuickReplies(); });
+  socket.on('message:deleted', applyMessageDeletion);
+  socket.on('history:cleared', applyHistoryClear);
+  socket.on('conversation:deleted', applyConversationDeletion);
+}
+function applyMessageDeletion(data) {
+  if(data.conversationId!==activeId)return;
+  deletedMessageIds.add(data.messageId);activeMessages=activeMessages.filter(visibleMessage);pendingMessages=pendingMessages.filter(visibleMessage);KivoChat.forgetImages(data.mediaIds);renderMessages();
+}
+function applyHistoryClear(data) {
+  drafts.delete(data.conversationId);if(data.conversationId!==activeId)return;
+  clearedThroughId=Math.max(clearedThroughId,data.throughId);activeMessages=activeMessages.filter(visibleMessage);pendingMessages=pendingMessages.filter(visibleMessage);composer.clear();KivoChat.clearImages();$('#message-input').value='';$('#older-messages').hidden=true;renderMessages();
+}
+function applyConversationDeletion(data) {
+  listRevision++;conversations=conversations.filter(c=>c.id!==data.conversationId);drafts.delete(data.conversationId);
+  if(activeId===data.conversationId){selectionRevision++;activeId=null;activeMessages=[];pendingMessages=[];loadingMessages=false;composer.clear();composer.closePicker();KivoChat.clearImages();$('#message-input').value='';$('#chat-active').hidden=true;$('#chat-empty').hidden=false;$('#visitor-details').hidden=true;$('#visitor-empty').hidden=false;$('.inbox-grid').classList.remove('chat-selected','show-details');}
+  renderConversations();
 }
 async function loadReplies() { replies = await api('/api/admin/replies'); renderQuickReplies(); renderReplyEditor(); }
 function renderQuickReplies() {
@@ -115,13 +133,14 @@ function renderDetails(c) {
   $('#visitor-ip').textContent=c.ip;$('#visitor-region').textContent=c.region;$('#visitor-site').textContent=c.site_name;
   $('#visitor-os').textContent=c.os||'未知系统';$('#visitor-browser').textContent=c.browser||'未知浏览器';
   $('#visitor-page').textContent=c.page;$('#visitor-page').href=c.page;
+  try{const page=new URL(c.page);$('#visitor-domain').textContent=page.host;$('#visitor-domain').href=page.origin;}catch{$('#visitor-domain').textContent='未知域名';$('#visitor-domain').removeAttribute('href');}
   $('#visitor-created').textContent=date(c.created_at);$('#visitor-updated').textContent=date(c.updated_at);
   $('#visitor-conversation-status').textContent=c.status==='closed'?'已结束':'进行中';
   $('#close-conversation').textContent=c.status==='closed'?'重新打开':'结束会话';$('#close-conversation').dataset.status=c.status;
 }
 async function selectConversation(id) {
   if (activeId) drafts.set(activeId,$('#message-input').value);
-  if(activeId!==id){composer.clear();composer.closePicker();KivoChat.clearImages();}
+  if(activeId!==id){composer.clear();composer.closePicker();KivoChat.clearImages();clearedThroughId=0;deletedMessageIds=new Set();}
   activeId=id;const revision=++selectionRevision;loadingMessages=true;pendingMessages=[];
   renderConversations();const c=conversations.find(c=>c.id===id);if(c)renderDetails(c);
   $('.inbox-grid').classList.add('chat-selected');$('#message-items').replaceChildren(element('div','muted','正在加载对话…'));
@@ -129,7 +148,7 @@ async function selectConversation(id) {
   try {
     const rows=await api(`/api/admin/conversations/${id}/messages`);
     if(revision!==selectionRevision)return;
-    activeMessages=[...new Map([...rows,...pendingMessages].map(m=>[m.id,m])).values()].sort((a,b)=>a.id-b.id);pendingMessages=[];renderMessages();$('#messages').scrollTop=$('#messages').scrollHeight;$('#older-messages').hidden=rows.length<100;
+    activeMessages=[...new Map([...rows,...pendingMessages].filter(visibleMessage).map(m=>[m.id,m])).values()].sort((a,b)=>a.id-b.id);pendingMessages=[];renderMessages();$('#messages').scrollTop=$('#messages').scrollHeight;$('#older-messages').hidden=rows.length<100||!activeMessages.length;
     loadingMessages=false;$('#send-message').disabled=!socket?.connected;markRead();
   } catch(e) { if(revision===selectionRevision){loadingMessages=false;$('#message-items').replaceChildren(element('p','error',e.message));} throw e; }
 }
@@ -137,11 +156,11 @@ function renderMessages() {
   const container=$('#message-items');container.replaceChildren();
   if(!activeMessages.length)container.append(element('p','muted','访客还没有发送消息。用一句问候开始对话吧。'));
   activeMessages.forEach(m=>{
-    const row=element('div',`message-row ${m.sender}`);row.append(element('div','message-meta',`${m.sender==='auto'?'自动回复':m.sender==='agent'?'客服':'访客'} · ${date(m.created_at)}`),KivoChat.renderMessage(m,{onImageLoad:()=>{const panel=$('#messages');if(panel.scrollHeight-panel.scrollTop-panel.clientHeight<260)panel.scrollTop=panel.scrollHeight;}}));container.append(row);
+    const row=element('div',`message-row ${m.sender}`),meta=element('div','message-meta',`${m.sender==='auto'?'自动回复':m.sender==='agent'?'客服':'访客'} · ${date(m.created_at)}`),remove=element('button','message-delete','删除');remove.type='button';remove.setAttribute('aria-label',`删除消息 ${m.id}`);remove.onclick=()=>openDelete({kind:'message',url:`/api/admin/conversations/${activeId}/messages/${m.id}`,summary:`删除这条${m.kind==='image'?'图片':m.kind==='sticker'?'表情':'消息'}：${m.body?.slice(0,80)||'（无文字）'}`});meta.append(remove);row.append(meta,KivoChat.renderMessage(m,{onImageLoad:()=>{const panel=$('#messages');if(panel.scrollHeight-panel.scrollTop-panel.clientHeight<260)panel.scrollTop=panel.scrollHeight;}}));container.append(row);
   });
 }
 function addMessage(m) {
-  if(activeMessages.some(item=>item.id===m.id))return;
+  if(!visibleMessage(m)||activeMessages.some(item=>item.id===m.id))return;
   const bottom=$('#messages').scrollHeight-$('#messages').scrollTop-$('#messages').clientHeight<100;
   activeMessages.push(m);activeMessages.sort((a,b)=>a.id-b.id);renderMessages();if(bottom||m.sender==='agent')$('#messages').scrollTop=$('#messages').scrollHeight;
 }
@@ -150,6 +169,33 @@ function markRead() {
   post(`/api/admin/conversations/${activeId}/read`,{lastId:activeMessages.at(-1)?.id||0}).catch(e=>toast(e.message));
 }
 function embedCode(s) { return `<script src="${publicUrl}/widget.js" data-site="${s.id}" async></script>`; }
+function openDelete(plan) {
+  deletePlan=plan;deleteRevision++;$('#delete-title').textContent={bulk:'批量删除对话',message:'删除单条消息',clear:'清空当前记录',conversation:'删除当前会话'}[plan.kind];
+  $('#cleanup-scope-field').hidden=plan.kind!=='bulk';$('#delete-summary').textContent=plan.summary||'';$('#delete-error').textContent='';$('#confirm-delete').disabled=false;$('#delete-dialog').showModal();
+  if(plan.kind==='bulk')previewCleanup();
+}
+async function previewCleanup() {
+  const revision=++deleteRevision,scope=$('#cleanup-scope').value,siteId=$('#site-filter').value;$('#confirm-delete').disabled=true;$('#delete-summary').textContent='正在统计对话…';$('#delete-error').textContent='';
+  try{
+    const result=await api(`/api/admin/conversations/cleanup?${new URLSearchParams({scope,siteId})}`);
+    if(revision!==deleteRevision)return;
+    deletePlan={kind:'bulk',url:'/api/admin/conversations/cleanup',body:{scope,siteId,cutoff:result.cutoff}};
+    const website=siteId?sites.find(s=>s.id===siteId)?.name:'所有网站';
+    $('#delete-summary').textContent=`${website}：将删除 ${result.count} 段会话及全部聊天记录。${scope==='all'?'包括进行中和已结束会话。':`最近消息早于 ${date(result.cutoff)} 的会话才会删除。`}不受列表搜索或状态筛选影响。`;
+    $('#confirm-delete').disabled=!result.count;
+  }catch(e){if(revision===deleteRevision)$('#delete-error').textContent=e.message;}
+}
+$('#cleanup-conversations').onclick=()=>openDelete({kind:'bulk'});$('#cleanup-scope').onchange=previewCleanup;
+$('#clear-history').onclick=()=>{if(activeId)openDelete({kind:'clear',url:`/api/admin/conversations/${activeId}/messages`,summary:`清空「${$('#chat-name').textContent}」的全部聊天记录及图片，保留该访客会话。`});};
+$('#delete-conversation').onclick=()=>{if(activeId)openDelete({kind:'conversation',url:`/api/admin/conversations/${activeId}`,summary:`删除「${$('#chat-name').textContent}」的会话及全部聊天记录、图片。访客可重新开始新对话。`});};
+for(const id of ['#close-delete','#cancel-delete'])$(id).onclick=()=>{if(!deleting)$('#delete-dialog').close();};
+$('#delete-dialog').addEventListener('cancel',e=>{if(deleting)e.preventDefault();});$('#delete-dialog').addEventListener('close',()=>{deleteRevision++;deletePlan=null;});
+$('#confirm-delete').onclick=async()=>{
+  if(!deletePlan||deleting)return;const plan=deletePlan;deleting=true;$('#confirm-delete').disabled=true;$('#close-delete').disabled=true;$('#cancel-delete').disabled=true;$('#cleanup-scope').disabled=true;
+  try{const result=await api(plan.url,{method:plan.kind==='bulk'?'POST':'DELETE',...(plan.body?{body:JSON.stringify(plan.body)}:{})});if(plan.kind==='message')applyMessageDeletion(result);if(plan.kind==='clear')applyHistoryClear(result);if(plan.kind==='conversation')applyConversationDeletion(result);if(plan.kind==='bulk')result.deletedIds.forEach(conversationId=>applyConversationDeletion({conversationId}));$('#delete-dialog').close();toast(plan.kind==='bulk'?`已删除 ${result.count} 段会话`:'已删除，访客端同步更新');await loadConversations();}
+  catch(e){$('#delete-error').textContent=e.message;}
+  finally{deleting=false;$('#confirm-delete').disabled=false;$('#close-delete').disabled=false;$('#cancel-delete').disabled=false;$('#cleanup-scope').disabled=false;}
+};
 function renderSites() {
   const list=$('#sites-list');list.replaceChildren();
   if(!sites.length){const empty=element('div','panel');empty.append(element('h2','','准备好接待第一位访客了吗？'),element('p','muted','添加网站后，复制生成的 JavaScript 代码到网页，即可启用右下角的客服窗口。'));list.append(empty);return;}
@@ -226,7 +272,7 @@ $('#message-form').onsubmit=e=>{
     drafts.delete(id);if(activeId===id){addMessage(result.message);composer.clear();if($('#message-input').value.trim()===body)$('#message-input').value='';}
   });
 };
-$('#older-messages').onclick=async()=>{const id=activeId,button=$('#older-messages');button.disabled=true;try{const rows=await api(`/api/admin/conversations/${id}/messages?before=${activeMessages[0]?.id||0}`);if(id!==activeId)return;const height=$('#messages').scrollHeight;activeMessages=[...rows,...activeMessages];renderMessages();$('#messages').scrollTop+=$('#messages').scrollHeight-height;button.hidden=rows.length<100;}catch(e){toast(e.message);}finally{button.disabled=false;}};
+$('#older-messages').onclick=async()=>{const id=activeId,button=$('#older-messages');button.disabled=true;try{const rows=await api(`/api/admin/conversations/${id}/messages?before=${activeMessages[0]?.id||0}`);if(id!==activeId)return;const height=$('#messages').scrollHeight;activeMessages=[...rows,...activeMessages].filter(visibleMessage);renderMessages();$('#messages').scrollTop+=$('#messages').scrollHeight-height;button.hidden=rows.length<100||!activeMessages.length;}catch(e){toast(e.message);}finally{button.disabled=false;}};
 $('#add-site').onclick=()=>openSite();$('#close-dialog').onclick=()=>$('#site-dialog').close();
 $('#site-dialog').addEventListener('close',()=>{avatarRevision++;avatarUploading=false;});
 $('#avatar-file').onchange=async e=>{

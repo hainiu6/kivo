@@ -13,6 +13,8 @@ import { deviceInfo } from './device.js';
 import { MAX_IMAGE_BYTES, storeImage } from './media.js';
 import multer from 'multer';
 import { verifyIdentity } from './identity.js';
+import { registerHistoryRoutes } from './history.js';
+import { visitorIP } from './ip.js';
 
 const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -99,12 +101,7 @@ export function createKivo(options = {}) {
   };
   const adminOnly = (req, res, next) => { req.user = sessionUser(req); req.user ? next() : res.status(401).json({ error: '请先登录' }); };
   const sameOrigin = (req, res, next) => req.headers.origin === publicOrigin ? next() : res.status(403).json({ error: '请求来源不允许，请检查 PUBLIC_URL' });
-  const ipOf = req => {
-    if (req.ip) return req.ip.replace(/^::ffff:/, '');
-    // The bundled proxy is the only network path to the application container.
-    const forwarded = trustProxy === 1 ? req.headers['x-forwarded-for']?.split(',').at(-1)?.trim() : null;
-    return (forwarded || req.socket.remoteAddress || '').replace(/^::ffff:/, '');
-  };
+  const ipOf = req => visitorIP(req, trustProxy);
   const regionOf = ip => {
     const geo = geoip.lookup(ip);
     if (!geo) return '未知 / 内网';
@@ -309,6 +306,7 @@ export function createKivo(options = {}) {
     const rows = db.prepare(`SELECT id FROM conversations WHERE (name LIKE ? OR ip LIKE ? OR page LIKE ? OR id IN (SELECT conversation_id FROM website_users WHERE user_id LIKE ? OR account LIKE ? OR nickname LIKE ?)) AND (?='' OR status=?) AND (?='' OR site_id=?) ORDER BY updated_at DESC LIMIT 200`).all(q,q,q,q,q,q,status,status,site,site);
     res.json(rows.map(r => conversation(r.id)));
   });
+  registerHistoryRoutes(app, { db, dataDir, io, conversation, updateConversation });
   app.get('/api/admin/conversations/:id/messages', (req, res) => {
     if (!conversation(req.params.id)) return res.status(404).json({ error: '会话不存在' });
     res.json(messages(req.params.id, req.query.before));
@@ -407,6 +405,8 @@ export function createKivo(options = {}) {
       socket.join('admins'); admins.add(socket.id); io.emit('agents:status', { online: true });
     } else {
       const id = socket.data.conversationId;
+      const ip = ipOf(socket.request);
+      db.prepare('UPDATE conversations SET ip=?,region=? WHERE id=?').run(ip,regionOf(ip),id);
       socket.join(`conversation:${id}`);
       if (!visitors.has(id)) visitors.set(id, new Set());
       visitors.get(id).add(socket.id); updateConversation(id);

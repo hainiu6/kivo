@@ -1,0 +1,104 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { randomUUID, createHmac } from 'node:crypto';
+import sharp from 'sharp';
+import { io } from 'socket.io-client';
+import { createKivo } from '../server/app.js';
+
+const origin='http://localhost:31996', shop='https://shop.example', password='history-test-password';
+const event=(socket,name)=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Timeout '+name)),4000);socket.once(name,data=>{clearTimeout(timer);resolve(data);});});
+const send=(socket,body,attachment={})=>new Promise((resolve,reject)=>socket.timeout(3000).emit('message:send',{body,clientId:randomUUID(),...attachment},(error,result)=>error?reject(error):resolve(result)));
+async function setup(t){
+  const dir=mkdtempSync(path.join(os.tmpdir(),'kivo-history-')), service=createKivo({dataDir:dir,publicUrl:origin,adminPassword:password}),sockets=[];
+  await new Promise(resolve=>service.server.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${service.server.address().port}`;
+  t.after(async()=>{sockets.forEach(s=>s.disconnect());await service.close();rmSync(dir,{recursive:true,force:true});});
+  const request=(route,{body,method=body?'POST':'GET',cookie='',requestOrigin=origin}={})=>fetch(base+route,{method,headers:{Origin:requestOrigin,Cookie:cookie,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});
+  const login=await request('/api/login',{body:{username:'admin',password}}),cookie=login.headers.get('set-cookie').split(';')[0];
+  const admin=(route,options={})=>request(route,{cookie,...options});
+  const site=await (await admin('/api/admin/sites',{body:{name:'test',origins:[shop]}})).json();
+  const session=async()=> (await request('/api/widget/session',{requestOrigin:shop,body:{siteId:site.id,page:shop+'/account',visitorName:'Alice'}})).json();
+  const connect=async(auth,transports=['websocket'])=>{const s=io(base,{auth,autoConnect:false,reconnection:false,transports,extraHeaders:{Origin:origin,...(auth.role==='admin'?{Cookie:cookie}:{})}});sockets.push(s);const ready=event(s,'connect');s.connect();await ready;return s;};
+  return {dir,service,request,admin,site,session,connect,base};
+}
+
+test('admin deletion synchronizes live visitors and admins, removes media, preserves isolation and permits a fresh conversation',async t=>{
+  const {dir,service,request,admin,site,session,connect,base}=await setup(t),a=await session(),b=await session();
+  const visitor=await connect({role:'visitor',siteId:site.id,visitorToken:a.visitorToken}),other=await connect({role:'visitor',siteId:site.id,visitorToken:b.visitorToken}),operator=await connect({role:'admin'});
+  const polling=await connect({role:'visitor',siteId:site.id,visitorToken:a.visitorToken},['polling']);
+  let leaked=false;for(const name of ['message:deleted','history:cleared','conversation:deleted'])other.on(name,()=>{leaked=true;});
+  const first=(await send(visitor,'first')).message,second=(await send(visitor,'second')).message;
+  assert.equal((await admin(`/api/admin/conversations/${a.conversationId}/messages/${first.id}`,{method:'DELETE',cookie:''})).status,401);
+  assert.equal((await admin(`/api/admin/conversations/${a.conversationId}/messages/${first.id}`,{method:'DELETE',requestOrigin:shop})).status,403);
+  assert.equal((await admin(`/api/admin/conversations/${b.conversationId}/messages/${first.id}`,{method:'DELETE'})).status,404);
+  await admin(`/api/admin/conversations/${a.conversationId}/read`,{body:{lastId:first.id}});
+  const removed=event(visitor,'message:deleted'),adminRemoved=event(operator,'message:deleted');
+  assert.equal((await admin(`/api/admin/conversations/${a.conversationId}/messages/${first.id}`,{method:'DELETE'})).status,200);
+  assert.equal((await removed).messageId,first.id);assert.equal((await adminRemoved).conversationId,a.conversationId);
+  assert.equal(service.db.prepare('SELECT unread FROM conversations WHERE id=?').get(a.conversationId).unread,1,'deleting an already read message leaves unread count unchanged');
+  await admin(`/api/admin/conversations/${a.conversationId}/messages/${second.id}`,{method:'DELETE'});
+  assert.equal(service.db.prepare('SELECT unread FROM conversations WHERE id=?').get(a.conversationId).unread,0);
+  const png=await sharp({create:{width:10,height:10,channels:4,background:'#f00'}}).png().toBuffer();
+  const login=await request('/api/login',{body:{username:'admin',password}}),cookie=login.headers.get('set-cookie').split(';')[0];
+  const upload=async route=>(await fetch(base+route,{method:'POST',headers:{Origin:origin,Cookie:cookie,'Content-Type':'image/png'},body:png})).json();
+  const avatar=await upload('/api/admin/avatar'),image=await upload(`/api/admin/conversations/${a.conversationId}/images`);
+  const imageOne=(await send(visitor,'photo',{kind:'image',mediaId:image.id})).message,imageTwo=(await send(visitor,'same image',{kind:'image',mediaId:image.id})).message;
+  await admin(`/api/admin/conversations/${a.conversationId}/messages/${imageOne.id}`,{method:'DELETE'});
+  assert.ok(existsSync(path.join(dir,'media',image.id+'.webp')),'shared image remains until its last reference is removed');
+  await admin(`/api/admin/conversations/${a.conversationId}/messages/${imageTwo.id}`,{method:'DELETE'});
+  assert.equal(existsSync(path.join(dir,'media',image.id+'.webp')),false);
+  const pending=await upload(`/api/admin/conversations/${a.conversationId}/images`);
+  const message=(await send(visitor,'clear me')).message,clear=event(visitor,'history:cleared');
+  await admin(`/api/admin/conversations/${a.conversationId}/messages`,{method:'DELETE'});
+  assert.ok((await clear).throughId>=message.id);assert.equal(visitor.connected,true);
+  assert.deepEqual(await (await admin(`/api/admin/conversations/${a.conversationId}/messages`)).json(),[]);
+  assert.equal(existsSync(path.join(dir,'media',pending.id+'.webp')),false,'unsent attachments are also cleared');
+  assert.ok(existsSync(path.join(dir,'media',avatar.id+'.webp')),'customer-service avatar is preserved');
+  assert.equal((await send(visitor,'new after clear')).ok,true,'clearing history keeps the chat usable');
+  const deleted=event(visitor,'conversation:deleted'),disconnected=event(visitor,'disconnect'),pollingDeleted=event(polling,'conversation:deleted');
+  assert.equal((await admin(`/api/admin/conversations/${a.conversationId}`,{method:'DELETE'})).status,200);
+  assert.equal((await deleted).conversationId,a.conversationId);assert.equal((await pollingDeleted).conversationId,a.conversationId,'polling-only browsers receive deletion before disconnection');await disconnected;
+  for(const table of ['messages','media','visitor_devices','visitor_labels','auto_reply_state'])assert.equal(service.db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE conversation_id=?`).get(a.conversationId).n,0);
+  assert.equal((await admin(`/api/admin/conversations/${a.conversationId}/messages`)).status,404);
+  const fresh=await (await request('/api/widget/session',{requestOrigin:shop,body:{siteId:site.id,page:shop+'/account',visitorToken:a.visitorToken}})).json();
+  assert.notEqual(fresh.conversationId,a.conversationId);assert.equal(leaked,false);
+});
+
+test('bulk cleanup handles all records beyond the list limit, site scopes, retention boundaries and activity after preview',async t=>{
+  const {service,admin,site,session,connect}=await setup(t),stamp=Date.now();
+  const seed=(age,siteId=site.id)=>{const id=randomUUID();service.db.prepare('INSERT INTO conversations(id,site_id,visitor_hash,name,ip,region,page,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)').run(id,siteId,id,'seed','127.0.0.1','local',shop+'/',stamp-age*86400000,stamp-age*86400000);return id;};
+  const siteB=await (await admin('/api/admin/sites',{body:{name:'other',origins:[shop]}})).json(),elsewhere=seed(90,siteB.id),active=seed(90);
+  service.db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(stamp,active);
+  seed(35);seed(8);seed(1);
+  const seven=await (await admin(`/api/admin/conversations/cleanup?scope=7days&siteId=${site.id}`)).json();assert.equal(seven.count,2);
+  const old=seed(9),a=await session(),live=await connect({role:'visitor',siteId:site.id,visitorToken:a.visitorToken});
+  service.db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(stamp-40*86400000,a.conversationId);
+  const month=await (await admin(`/api/admin/conversations/cleanup?scope=month&siteId=${site.id}`)).json();assert.equal(month.count,2);
+  await send(live,'recent activity must survive');
+  const result=await (await admin('/api/admin/conversations/cleanup',{body:{scope:'month',siteId:site.id,cutoff:month.cutoff}})).json();assert.equal(result.count,1);
+  assert.ok(service.db.prepare('SELECT id FROM conversations WHERE id=?').get(a.conversationId));
+  const boundary=seed(10);service.db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(seven.cutoff,boundary);
+  const weekResult=await (await admin('/api/admin/conversations/cleanup',{body:{scope:'7days',siteId:site.id,cutoff:seven.cutoff}})).json();assert.equal(weekResult.count,2);assert.ok(weekResult.deletedIds.includes(old));
+  assert.ok(service.db.prepare('SELECT id FROM conversations WHERE id=?').get(boundary),'strict cutoff keeps the exact boundary');
+  assert.ok(service.db.prepare('SELECT id FROM conversations WHERE id=?').get(elsewhere),'other website is preserved');
+  for(let i=0;i<220;i++)seed(50);
+  const preview=await (await admin('/api/admin/conversations/cleanup?scope=all')).json();assert.ok(preview.count>200);
+  await new Promise(resolve=>setTimeout(resolve,3));const afterPreview=seed(0);service.db.prepare('UPDATE conversations SET created_at=? WHERE id=?').run(Date.now(),afterPreview);
+  assert.equal((await admin('/api/admin/conversations/cleanup',{body:{scope:'bad',cutoff:0}})).status,400);
+  assert.equal((await admin('/api/admin/conversations/cleanup',{body:{scope:'all',cutoff:Date.now()+10000}})).status,400);
+  const final=await (await admin('/api/admin/conversations/cleanup',{body:{scope:'all',cutoff:preview.cutoff}})).json();assert.equal(final.count,preview.count);
+  assert.deepEqual(service.db.prepare('SELECT id FROM conversations').all().map(c=>c.id),[afterPreview]);
+});
+
+test('deleting a verified account removes its association and starts with empty history when it next connects',async t=>{
+  const {service,admin,request,site}=await setup(t),key=await (await admin(`/api/admin/sites/${site.id}/identity`,{body:{action:'rotate'}})).json();
+  const timestamp=Math.floor(Date.now()/1000),payload=Buffer.from(JSON.stringify({siteId:site.id,userId:'user-1',account:'alice',nickname:'Alice',iat:timestamp,exp:timestamp+900})).toString('base64url');
+  const identityToken=payload+'.'+createHmac('sha256',key.secret).update(payload).digest('base64url');
+  const create=async()=> (await request('/api/widget/session',{requestOrigin:shop,body:{siteId:site.id,page:shop+'/',identityToken}})).json();
+  const a=await create();await admin(`/api/admin/conversations/${a.conversationId}`,{method:'DELETE'});
+  assert.equal(service.db.prepare('SELECT COUNT(*) AS n FROM website_users').get().n,0);
+  const b=await create();assert.notEqual(b.conversationId,a.conversationId);assert.equal(b.identity.userId,'user-1');
+  assert.deepEqual(await (await admin(`/api/admin/conversations/${b.conversationId}/messages`)).json(),[]);
+});
