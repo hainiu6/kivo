@@ -5,3 +5,8 @@ backups/
 coverage/
 *.log
 .DS_Store
+dist/
+runtime/
+docker-data/
+runtime.env
+deployment.env

@@ -59,7 +59,7 @@ kivo_run() {
   kivo_docker run -d --name "$CONTAINER" --label io.kivo.managed=true \
     --restart unless-stopped --init --read-only --security-opt no-new-privileges:true \
     --tmpfs /tmp:rw,noexec,nosuid,size=64m --log-opt max-size=10m --log-opt max-file=3 \
-    --env-file "$ROOT/.env" --env DATA_DIR=/app/data --env NODE_ENV=production \
+    --env-file "$ROOT/.env" --env DATA_DIR=/app/data --env NODE_ENV=production --env PORT=3000 \
     --publish "$BIND_HOST:$HTTP_PORT:3000" --mount "type=bind,src=$ROOT/data,dst=/app/data" "$image"
 }
 kivo_fetch_bundle() {
@@ -86,9 +86,15 @@ kivo_fetch_bundle() {
   RELEASE_VERSION="$version"
 }
 kivo_save_release() {
+  local file name
   install -m 700 -d "$ROOT/scripts"
-  cp "$BUNDLE"/scripts/*.sh "$ROOT/scripts/"
-  chmod 700 "$ROOT"/scripts/*.sh
+  # Atomic replacement preserves the file descriptor of a currently running upgrade script.
+  for file in "$BUNDLE"/scripts/*.sh; do
+    name="${file##*/}"
+    cp "$file" "$ROOT/scripts/$name.new"
+    chmod 700 "$ROOT/scripts/$name.new"
+    mv "$ROOT/scripts/$name.new" "$ROOT/scripts/$name"
+  done
   printf 'KIVO_VERSION=%s\nKIVO_IMAGE=%s\nKIVO_REVISION=%s\nKIVO_ARCH=%s\nKIVO_CONTAINER=%s\n' "$RELEASE_VERSION" "$IMAGE" "$REVISION" "$(kivo_arch)" "$CONTAINER" > "$ROOT/deployment.env.new"
   mv "$ROOT/deployment.env.new" "$ROOT/deployment.env"
   chmod 600 "$ROOT/deployment.env"
