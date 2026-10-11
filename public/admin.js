@@ -16,7 +16,7 @@ async function api(url, options = {}) {
   return data;
 }
 const post = (url, data = {}) => api(url,{method:'POST',body:JSON.stringify(data)});
-function showLogin() { socket?.disconnect(); $('#workspace').hidden = true; $('#login-screen').hidden = false; activeId = null; }
+function showLogin() { socket?.disconnect(); $('#workspace').hidden = true; $('#login-screen').hidden = false; activeId = null; $('#chat-empty').hidden = false; $('#chat-active').hidden = true; $('#visitor-empty').hidden = false; $('#visitor-details').hidden = true; }
 function switchView(next) {
   view = next; ['inbox','sites','settings'].forEach(v => $(`#view-${v}`).hidden = v !== next);
   $$('.nav-button').forEach(b => b.classList.toggle('active',b.dataset.view === next));

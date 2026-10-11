@@ -1,6 +1,6 @@
 /* global io */
 const $ = id => document.getElementById(id);
-let socket, parentOrigin, initialized = false, opened = false, rows = [], sending = false;
+let socket, parentOrigin, currentPage, initialized = false, opened = false, rows = [], sending = false;
 const siteId = new URLSearchParams(location.search).get('site');
 function tell(type) { parent.postMessage({ kivo:true,type }, parentOrigin || '*'); }
 function error(message) { $('error').textContent=message; $('error').hidden=!message; }
@@ -18,10 +18,10 @@ function add(m) { if(rows.some(r=>r.id===m.id))return;rows.push(m);rows.sort((a,
 function initialize(data, origin) {
   if(initialized||data.site?.id!==siteId||origin!==data.parentOrigin)return;
   const page=new URL(data.page);if(page.origin!==origin)return;
-  initialized=true;parentOrigin=origin;opened=data.opened;
+  initialized=true;parentOrigin=origin;opened=data.opened;currentPage=data.page;
   document.documentElement.style.setProperty('--accent',data.site.color);$('site-name').textContent=data.site.name;$('greeting').textContent=data.site.greeting;
   socket=io({auth:{role:'visitor',siteId,visitorToken:data.visitorToken},reconnection:true});
-  socket.on('connect',()=>{$('message-input').disabled=false;$('send').disabled=false;error('');socket.emit('visitor:page',{page:data.page});});
+  socket.on('connect',()=>{$('message-input').disabled=false;$('send').disabled=false;error('');socket.emit('visitor:page',{page:currentPage});});
   socket.on('disconnect',()=>{$('agent-status').textContent='连接已断开，正在重连…';$('send').disabled=true;});
   socket.on('connect_error',()=>{$('agent-status').textContent='暂时无法连接';error('连接暂时不可用，正在自动重试。');$('send').disabled=true;});
   socket.on('agents:status',data=>$('agent-status').textContent=data.online?'● 客服在线，随时为你服务':'○ 客服暂时离线，请留言，我们会尽快回复');
@@ -32,7 +32,7 @@ window.addEventListener('message',event=>{
   if(event.source!==parent||!event.data?.kivo)return;
   if(event.data.type==='init'){try{initialize(event.data,event.origin);}catch{error('初始化失败，请刷新页面重试。');}return;}
   if(event.origin!==parentOrigin)return;
-  if(event.data.type==='page'){const page=event.data.page;if(typeof page==='string'&&new URL(page).origin===parentOrigin){socket?.emit('visitor:page',{page});}}
+  if(event.data.type==='page'){const page=event.data.page;try{if(typeof page==='string'&&new URL(page).origin===parentOrigin){currentPage=page;if(socket?.connected)socket.emit('visitor:page',{page});}}catch{/* Ignore invalid host page notifications. */}}
   if(event.data.type==='visibility'){opened=!!event.data.opened;if(opened){$('messages').scrollTop=$('messages').scrollHeight;$('message-input').focus();}}
 });
 $('close').onclick=()=>tell('close');document.addEventListener('keydown',e=>{if(e.key==='Escape')tell('close');});
