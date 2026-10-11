@@ -32,7 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/panhui/Kivo/main/scripts/install.sh
 - 默认只发布 **8088 → 容器 3000**，不占用 80 / 443。8088 被占用时自动尝试 8089–8107；显式指定端口被占用则退出。
 - 数据在 `/opt/kivo/data`，配置在 `/opt/kivo/.env`；初始账号 `admin`，随机密码在安装完成时显示并保存在 `.env`。登录后可修改密码。
 
-安装成功后访问显示的后台地址，并在服务器防火墙 / 云安全组放行实际端口。安装器不自动修改防火墙。已有同名容器会退出，不会覆盖它。
+安装成功后访问显示的后台地址，并在服务器防火墙 / 云安全组放行实际端口。安装器不配置云安全组或额外放行规则；Docker 会创建容器所需的网络规则。已有同名容器会退出，不会覆盖它。
 
 若服务器在 NAT 后，指定正确公网地址（替换示例 IP）：
 
@@ -167,6 +167,8 @@ for file in scripts/*.sh test/*.sh; do bash -n "$file"; done
 ```
 
 应用集成测试覆盖真实 HTTP / Socket.IO 登录、来源校验、双向消息、访客隔离、历史持久化、在线备份和 HTTP 消息 ID。CI 保留 Compose 测试；Docker release 工作流在原生 amd64 / arm64 runner 构建，使用 Debian 10 测试容器验证默认 8088、占用自动换端口、容器保护、备份、升级、数据保留、失败回退与校验失败。测试夹具中 apt 仅用于预装测试工具，正式部署脚本不会调用 apt / dpkg。
+
+独立运行时测试在特权 Debian 10 容器中启动真实 dockerd，验证独立 socket、存储、网桥及应用健康状态；测试适配器执行生成的 systemd 单元启动命令，完整 systemd 启动流程与 4.19 内核仍需在目标服务器验证。运行时配置依据 [dockerd 官方参数文档](https://docs.docker.com/reference/cli/dockerd/)。
 
 在 GitHub Actions 手动运行 **Docker release** 并指定新版本号，或推送 `v*` 标签，即可发布双架构安装包、SHA256SUMS、version.txt。服务器安装器下载 Release 附件，不需要镜像仓库账号。安装包包含镜像与安装 / 升级脚本，升级跟随已测试发行版本。
 
