@@ -164,7 +164,7 @@ npm audit --omit=dev
 bash -n scripts/install.sh scripts/upgrade.sh scripts/backup.sh
 ```
 
-集成测试使用真实 HTTP / Socket.IO 连接，验证登录、来源限制、访客会话恢复、双向消息、重复消息去重、访客之间隔离、已读状态、结束 / 重开、网址更新、重启持久化、密码撤销和在线备份。GitHub Actions 还构建并启动 Docker Compose，检查 HTTP 健康状态及容器内数据库备份。
+集成测试使用真实 HTTP / Socket.IO 连接，验证登录、来源限制、访客会话恢复、双向消息、重复消息去重、访客之间隔离、已读状态、结束 / 重开、网址更新、重启持久化、密码撤销和在线备份；额外验证默认 HTTP / IP 部署中的消息 ID 兼容性。GitHub Actions 还构建并启动 Docker Compose，检查 HTTP 健康状态、容器内数据库备份和升级脚本。
 
 当前版本是单实例、单管理员的文本客服系统；不包含文件上传、客服分配或多管理员管理。SQLite 和内存在线状态适用于单机部署，请勿直接横向扩容多个应用容器。
 

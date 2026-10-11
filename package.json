@@ -10,7 +10,7 @@
     "start": "node --env-file-if-exists=.env server/index.js",
     "dev": "node --watch --env-file-if-exists=.env server/index.js",
     "test": "node --test test/*.test.js",
-    "check": "node --check server/index.js && node --check server/app.js && node --check public/admin.js && node --check public/widget.js && node --check public/widget-frame.js"
+    "check": "node --check server/index.js && node --check server/app.js && node --check public/admin.js && node --check public/widget.js && node --check public/widget-frame.js && node --check public/message-id.js"
   },
   "dependencies": {
     "bcryptjs": "3.0.3",

@@ -26,5 +26,8 @@ jobs:
           curl --fail --retry 8 --retry-connrefused --retry-delay 2 http://localhost:8080/healthz
           sudo git config --global --add safe.directory "$PWD"
           sudo bash scripts/backup.sh
+          git checkout -B main
+          sudo bash scripts/upgrade.sh
+          curl --fail http://localhost:8080/healthz
       - if: always()
         run: docker compose logs --tail 80
