@@ -48,6 +48,7 @@ export function createKivo(options = {}) {
     CREATE TABLE IF NOT EXISTS media(id TEXT PRIMARY KEY, kind TEXT NOT NULL, conversation_id TEXT REFERENCES conversations(id), bytes INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, created_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS site_identity(site_id TEXT PRIMARY KEY REFERENCES sites(id), secret TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS website_users(conversation_id TEXT PRIMARY KEY REFERENCES conversations(id),site_id TEXT NOT NULL REFERENCES sites(id),user_id TEXT NOT NULL,account TEXT NOT NULL,nickname TEXT NOT NULL,UNIQUE(site_id,user_id));
+    CREATE TABLE IF NOT EXISTS visitor_labels(conversation_id TEXT PRIMARY KEY REFERENCES conversations(id),name TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS site_profiles(site_id TEXT PRIMARY KEY REFERENCES sites(id), support_name TEXT NOT NULL DEFAULT '在线客服', avatar_id TEXT REFERENCES media(id));`);
   // Additive migration keeps older deployment and rollback images compatible.
   db.exec('BEGIN IMMEDIATE');
@@ -56,7 +57,7 @@ export function createKivo(options = {}) {
     if (!columns.has('kind')) db.exec("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'");
     if (!columns.has('media_id')) db.exec('ALTER TABLE messages ADD COLUMN media_id TEXT REFERENCES media(id)');
     if (!columns.has('sticker_id')) db.exec('ALTER TABLE messages ADD COLUMN sticker_id TEXT');
-    db.exec('PRAGMA user_version=4; COMMIT');
+    db.exec('PRAGMA user_version=5; COMMIT');
   } catch (e) { db.exec('ROLLBACK'); db.close(); throw e; }
   const defaultReplies = [{ label: '问候语', body: '你好，很高兴为你服务！' }, { label: '请稍候', body: '收到，请稍等，我帮你查看一下。' }, { label: '结束语', body: '感谢你的咨询，有其他问题随时联系我们。' }];
   const quickReplies = () => JSON.parse(db.prepare("SELECT value FROM settings WHERE key='quickReplies'").get()?.value || JSON.stringify(defaultReplies));
@@ -112,7 +113,7 @@ export function createKivo(options = {}) {
     return [country, geo.region, geo.city].filter(Boolean).join(' · ');
   };
   const conversation = id => {
-    const c = db.prepare(`SELECT c.*, s.name AS site_name, COALESCE(d.os,'未知系统') AS os, COALESCE(d.browser,'未知浏览器') AS browser, u.user_id,u.account,u.nickname, (SELECT CASE kind WHEN 'image' THEN '[图片] ' || body WHEN 'sticker' THEN '[动态表情]' ELSE body END FROM messages WHERE conversation_id=c.id ORDER BY id DESC LIMIT 1) AS last_message FROM conversations c JOIN sites s ON c.site_id=s.id LEFT JOIN visitor_devices d ON d.conversation_id=c.id LEFT JOIN website_users u ON u.conversation_id=c.id WHERE c.id=?`).get(id);
+    const c = db.prepare(`SELECT c.*, s.name AS site_name, COALESCE(d.os,'未知系统') AS os, COALESCE(d.browser,'未知浏览器') AS browser, u.user_id,u.account,u.nickname,l.name AS visitor_name, (SELECT CASE kind WHEN 'image' THEN '[图片] ' || body WHEN 'sticker' THEN '[动态表情]' ELSE body END FROM messages WHERE conversation_id=c.id ORDER BY id DESC LIMIT 1) AS last_message FROM conversations c JOIN sites s ON c.site_id=s.id LEFT JOIN visitor_devices d ON d.conversation_id=c.id LEFT JOIN website_users u ON u.conversation_id=c.id LEFT JOIN visitor_labels l ON l.conversation_id=c.id WHERE c.id=?`).get(id);
     return c ? { ...c, visitor_hash: undefined, online: (visitors.get(id)?.size || 0) > 0 } : null;
   };
   const updateConversation = id => io.to('admins').emit('conversation:update', conversation(id));
@@ -345,6 +346,7 @@ export function createKivo(options = {}) {
     const page = safePage(req.body?.page);
     if (!page || originOf(page) !== req.headers.origin) return res.status(400).json({ error: '访问地址无效' });
     let identity = null;
+    const visitorName = text(req.body?.visitorName,128).replace(/[\u0000-\u001f\u007f]/g,'').trim();
     if (req.body?.identityToken != null) {
       try { identity = verifyIdentity(req.body.identityToken, site.id, identitySecret(site.id)); }
       catch (e) { return res.status(403).json({ error: e.message }); }
@@ -361,6 +363,9 @@ export function createKivo(options = {}) {
       if (identity) {
         db.prepare('INSERT INTO website_users VALUES(?,?,?,?,?) ON CONFLICT(conversation_id) DO UPDATE SET account=excluded.account,nickname=excluded.nickname').run(c.id,site.id,identity.userId,identity.account,identity.nickname);
         db.prepare('UPDATE conversations SET name=? WHERE id=?').run(identity.account,c.id);
+      } else {
+        db.prepare('INSERT INTO visitor_labels VALUES(?,?) ON CONFLICT(conversation_id) DO UPDATE SET name=excluded.name').run(c.id,visitorName);
+        db.prepare('UPDATE conversations SET name=? WHERE id=?').run(visitorName || `访客 ${c.id.slice(0,6).toUpperCase()}`,c.id);
       }
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }

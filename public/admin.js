@@ -111,7 +111,7 @@ function renderDetails(c) {
   $('#chat-name').textContent=c.name;$('#chat-meta').textContent=`${c.online?'访客在线':'访客离线'} · ${c.site_name}`;
   $('#chat-avatar').textContent=c.name.slice(-2);$('#visitor-avatar').textContent=c.name.slice(-2);$('#visitor-name').textContent=c.name;
   $('#visitor-status').textContent=c.online?'● 在线':'● 离线';$('#visitor-status').classList.toggle('offline',!c.online);
-  $('#visitor-identity').textContent=c.user_id?'已验证的网站用户':'匿名访客';$('#visitor-user-id').textContent=c.user_id||'—';$('#visitor-account').textContent=c.account||'—';$('#visitor-nickname').textContent=c.nickname||'—';
+  $('#visitor-identity').textContent=c.user_id?'已验证的网站用户':c.visitor_name?'网站提供的名称':'匿名访客';$('#visitor-user-id').textContent=c.user_id||'—';$('#visitor-account').textContent=c.account||c.visitor_name||'—';$('#visitor-nickname').textContent=c.nickname||'—';
   $('#visitor-ip').textContent=c.ip;$('#visitor-region').textContent=c.region;$('#visitor-site').textContent=c.site_name;
   $('#visitor-os').textContent=c.os||'未知系统';$('#visitor-browser').textContent=c.browser||'未知浏览器';
   $('#visitor-page').textContent=c.page;$('#visitor-page').href=c.page;
@@ -159,9 +159,12 @@ function renderSites() {
     if(s.autoReply?.firstEnabled) origins.append(element('span','','首次留言自动回复'));
     if(s.autoReply?.offlineEnabled) origins.append(element('span','','离线自动回复'));
     const code=element('textarea','embed-code');code.value=embedCode(s);code.readOnly=true;code.setAttribute('aria-label',`${s.name} 的嵌入代码`);
-    const actions=element('div','site-actions');const copy=element('button','button primary small','复制嵌入代码');copy.onclick=async()=>{try{await navigator.clipboard.writeText(code.value);toast('嵌入代码已复制');}catch{code.select();toast('请按 Ctrl+C / ⌘C 复制选中的代码');}};
+    const actions=element('div','site-actions');
+    const copyCode=async value=>{code.value=value;try{await navigator.clipboard.writeText(value);toast('代码已复制，请放入对应网页模板');}catch{code.focus();code.select();toast('请按 Ctrl+C / ⌘C 复制选中的代码');}};
+    const copy=element('button','button primary small','复制嵌入代码');copy.onclick=()=>copyCode(embedCode(s));
+    const session=element('button','button secondary small','复制 PHP Session 代码');session.type='button';session.onclick=()=>copyCode(`<script src="${publicUrl}/widget.js" data-site="${s.id}" data-visitor-name="{{ Session::get('user.username', Session::get('username', '')) }}" async></script>`);
     const demo=element('a','text-link','打开测试页面 ↗');demo.href=`/demo?site=${encodeURIComponent(s.id)}`;demo.target='_blank';demo.rel='noopener';const identity=element('button','button secondary small','PHP 用户对接');identity.type='button';identity.onclick=()=>openIdentity(s);actions.append(copy,demo,identity);
-    card.append(header,origins,element('p','',s.greeting),code,actions);list.append(card);
+    actions.append(session);card.append(header,origins,element('p','',s.greeting),code,actions);list.append(card);
   });
 }
 let identitySiteId, identityRevision=0;

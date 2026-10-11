@@ -15,6 +15,7 @@
 - Socket.IO 实时消息、断线重连、历史记录、访客凭证恢复会话；支持加载更早消息。
 - 多网站接入：生成独立嵌入代码、指定允许来源或允许所有网站、网站配置与测试页面。
 - PHP 网站登录用户对接：后端签名校验，后台显示 / 搜索用户 ID、账号和昵称；同账号跨设备恢复历史，匿名及不同账号互相隔离。
+- 简化 PHP 接入：嵌入代码直接读取 Session 的 username 作为访客名称，缺少时显示默认访客，无需身份接口或签名配置。
 - 管理员密码哈希、HttpOnly Cookie、请求来源校验、登录及消息频率限制、修改密码撤销登录。
 - Docker 镜像一键安装、升级前在线备份、健康检查及失败回退。
 
@@ -112,7 +113,9 @@ KIVO_VERSION=v1.1.0 bash /opt/kivo/scripts/upgrade.sh
 
 4. 打开网站，点击右下角图标发送消息；后台会话列表实时出现对话。也可先使用后台「打开测试页面」。
 
-需要把网站登录账号传给客服时，打开网站卡片的 **PHP 用户对接**，生成后端签名密钥，按 [PHP / Laravel 对接说明](docs/php-integration.md) 配置。仓库提供普通 PHP 和针对 Laravel 5.4 的示例，由你自行复制到网站；密钥只保存在 PHP 后端。身份接口与网站同源，加载器读取 Session 对应的签名凭证，客服后台显示真实账号。单页网站在 AJAX 登录、退出或切换账号成功后调用 `window.Kivo?.refreshIdentity()`。
+只需显示网站 Session 中的 `username` 时，按 [Session 直接显示说明](docs/session-name.md) 替换 PHP / Blade 嵌入代码，设置 `data-visitor-name`；读不到时显示默认访客，无需额外接口、路由或密钥。名称仅用于显示，聊天和图片权限仍由独立访客凭证控制。
+
+需要验证账号并跨设备恢复历史时，打开网站卡片的 **PHP 用户对接**，生成后端签名密钥，按 [签名身份接入说明](docs/php-integration.md) 配置。仓库提供普通 PHP 和针对 Laravel 5.4 的示例，由你自行复制到网站；密钥只保存在 PHP 后端。单页网站在 AJAX 登录、退出或切换账号成功后调用 `window.Kivo?.refreshIdentity()`。
 
 有 CSP 的网站请允许客服域名的 `script-src`、`frame-src` 和 `connect-src`，加载器内联样式也需相应的 `style-src` 许可。嵌入代码不包含管理员凭证。
 

@@ -22,6 +22,38 @@ test('PHP HMAC tokens validate in Node; altered, expired, foreign and malformed 
   assert.throws(()=>verifyIdentity(token,siteId,''));assert.throws(()=>verifyIdentity('x'.repeat(5000),siteId,secret));
 });
 
+test('PHP session embed reads usernames, escapes HTML and defaults to anonymous without a session',()=>{
+  const source=new URL('../examples/php/kivo-session.php',import.meta.url).pathname;
+  const render=session=>execFileSync('php',['-r',`$_SESSION=json_decode(${JSON.stringify(JSON.stringify(session))},true);include ${JSON.stringify(source)};`],{encoding:'utf8'});
+  assert.match(render({username:'张三'}),/data-visitor-name="张三"/);
+  assert.match(render({user:{username:'user@example.com'}}),/data-visitor-name="user@example.com"/);
+  assert.match(render({username:'"><img src=x onerror=alert(1)>'}),/data-visitor-name="&quot;&gt;&lt;img/);
+  assert.match(render({}),/data-visitor-name=""/);
+  assert.match(render({username:[]}),/data-visitor-name=""/);
+  assert.doesNotMatch(render({username:'alice'}),/data-identity-url|data-identity-token/);
+});
+
+test('session-provided names persist as display labels and never grant signed account history',async t=>{
+  const dir=mkdtempSync(path.join(os.tmpdir(),'kivo-label-')),origin='http://localhost:31019',shop='https://shop.example';
+  let service=createKivo({dataDir:dir,publicUrl:origin,adminPassword:'label-test-password'});
+  const start=async()=>{await new Promise(resolve=>service.server.listen(0,'127.0.0.1',resolve));return `http://127.0.0.1:${service.server.address().port}`;};let base=await start();
+  t.after(async()=>{await service.close();rmSync(dir,{recursive:true,force:true});});
+  const post=async(route,body,cookie='',requestOrigin=origin)=>{const r=await fetch(base+route,{method:'POST',headers:{Origin:requestOrigin,Cookie:cookie,'Content-Type':'application/json'},body:JSON.stringify(body)});assert.ok(r.ok);return r;};
+  const cookie=(await post('/api/login',{username:'admin',password:'label-test-password'})).headers.get('set-cookie').split(';')[0];
+  const site=await(await post('/api/admin/sites',{name:'Session 网站',origins:[shop]},cookie)).json();
+  const session=async visitorName=>(await post('/api/widget/session',{siteId:site.id,page:shop,visitorName},'',shop)).json();
+  const named=await session('Session 用户');assert.equal(named.identity,null);
+  let rows=await(await fetch(base+'/api/admin/conversations',{headers:{Cookie:cookie}})).json();
+  assert.equal(rows[0].name,'Session 用户');assert.equal(rows[0].visitor_name,'Session 用户');assert.equal(rows[0].user_id,null);
+  const anonymous=await session('');rows=await(await fetch(base+'/api/admin/conversations',{headers:{Cookie:cookie}})).json();assert.match(rows.find(c=>c.id===anonymous.conversationId).name,/^访客 /);
+  assert.notEqual((await session('Session 用户')).conversationId,named.conversationId,'a matching name alone cannot restore another visitor');
+  const key=(await(await post(`/api/admin/sites/${site.id}/identity`,{action:'rotate'},cookie)).json()).secret;
+  const verified=await(await post('/api/widget/session',{siteId:site.id,page:shop,identityToken:sign(key,site.id),visitorName:'伪造显示名'},'',shop)).json();
+  assert.equal(verified.identity.account,'张三@example.com');assert.notEqual((await session('张三@example.com')).conversationId,verified.conversationId);
+  await service.close();service=createKivo({dataDir:dir,publicUrl:origin});base=await start();
+  rows=await(await fetch(base+'/api/admin/conversations',{headers:{Cookie:cookie}})).json();assert.equal(rows.find(c=>c.id===named.conversationId).name,'Session 用户');
+});
+
 test('verified accounts keep separate history across devices, logout, expiry and key rotation',async t=>{
   const dir=mkdtempSync(path.join(os.tmpdir(),'kivo-identity-')),origin='http://localhost:31009',shop='https://shop.example';
   let service=createKivo({dataDir:dir,publicUrl:origin,adminPassword:'identity-test-password'});

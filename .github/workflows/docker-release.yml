@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag (e.g. v1.4.0); must be new'
+        description: 'Release tag (e.g. v1.4.1); must be new'
         required: true
-        default: v1.4.0
+        default: v1.4.1
   push:
     tags: ['v*']
 permissions:
@@ -65,5 +65,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '新增 PHP 网站用户身份对接：后台显示并搜索用户 ID、账号及昵称，同一网站账号跨设备恢复聊天历史；匿名访客和不同账号的记录互相隔离。后端 HMAC-SHA256 签名，短期凭证、到期断开、图片权限校验和网站密钥重置。' '网站接入卡片新增「PHP 用户对接」，可生成、复制或关闭后端密钥，提供带身份接口的嵌入代码。普通 PHP 和 Laravel 5.4 示例及手动复制配置步骤见 docs/php-integration.md，网站文件由用户自行部署。' '升级保留网站、会话、图片、用户关联和签名密钥；升级后强制刷新后台及接入网站。服务器无需 PHP、apt、Git、npm 或 Compose；PHP 仅运行在业务网站的后端。' '两个架构均通过 PHP 签名互通、账号隔离及图片授权测试、实际容器上传，以及 Debian 10 用户空间安装、升级、账号关联与密钥保留、端口冲突和失败回退测试（CI 主机内核）。' > release-notes.md
+          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '新增 Session 名称显示模式：在 PHP / Blade 客服代码中直接读取现有 Session 的 username，后台显示该名称，读不到时使用默认访客。无需额外身份接口、路由、控制器、签名密钥或数据库查询；示例见 docs/session-name.md 和 examples/php/kivo-session.php。' 'Laravel 示例 kivo.blade.php 默认采用名称显示模式；签名模式移至 kivo-verified.blade.php，现有身份接口与签名功能继续兼容。网站文件由用户自行替换；需移除旧嵌入代码中的 data-identity-url。' '名称是展示信息，不授予已验证账号权限。同名不合并不同浏览器的记录，聊天及图片仍由独立访客凭证保护。用户名和默认访客分开保存，长 Unicode 名称及 HTML 字符得到处理。' '升级保留网站、会话、图片、名称和签名密钥；升级后刷新后台及接入网站。两个架构均通过 PHP Session 读取、默认访客、HTML 转义、名称隔离、签名兼容及图片权限测试，以及 Debian 10 用户空间安装、升级、数据保留、端口冲突和失败回退测试（CI 主机内核）。' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md

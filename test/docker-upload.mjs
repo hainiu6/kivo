@@ -31,13 +31,14 @@ if (process.argv[2] !== 'verify') {
   const identityToken=payload+'.'+createHmac('sha256',identity.secret).update(payload).digest('base64url');
   const { data: account } = await json('/api/widget/session',{siteId:site.id,page:'https://shop.example/user',identityToken},'','https://shop.example');
   assert.equal(account.identity.userId,'docker-user');
-  const { data: visitor } = await json('/api/widget/session', { siteId: site.id, page: 'https://shop.example/upload' }, '', 'https://shop.example');
+  const { data: visitor } = await json('/api/widget/session', { siteId: site.id, page: 'https://shop.example/upload', visitorName:'PHP Session 用户' }, '', 'https://shop.example');
   await upload('/api/widget/images', { Authorization: 'Bearer ' + visitor.visitorToken, 'X-Kivo-Site': site.id });
   await upload(`/api/admin/conversations/${visitor.conversationId}/images`, { Cookie: login.cookie });
   await upload('/api/admin/avatar', {}, 401);
 }
 const db = new DatabaseSync('/app/data/kivo.sqlite', { readOnly: true });
 const account=db.prepare('SELECT u.*,i.secret FROM website_users u JOIN site_identity i ON u.site_id=i.site_id WHERE u.user_id=?').get('docker-user');
+assert.equal(db.prepare('SELECT name FROM visitor_labels WHERE name=?').get('PHP Session 用户').name,'PHP Session 用户','session display names survive upgrade');
 assert.equal(account.account,'docker@example.com');assert.match(account.secret,/^[a-f0-9]{64}$/);
 const issued=Math.floor(Date.now()/1000),payload=Buffer.from(JSON.stringify({siteId:account.site_id,userId:account.user_id,account:account.account,nickname:account.nickname,iat:issued,exp:issued+900})).toString('base64url');
 const identityToken=payload+'.'+createHmac('sha256',account.secret).update(payload).digest('base64url');

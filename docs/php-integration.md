@@ -1,5 +1,7 @@
 # PHP 网站用户对接
 
+只需读取 Session 中的 `username` 并显示名称时，推荐 [Session 直接显示模式](session-name.md)：替换一段 PHP / Blade 嵌入代码即可，不需要本页的身份接口、控制器和签名密钥。以下是需要验证账号并跨设备恢复历史时的可选方案。
+
 Kivo v1.4.0 起支持网站登录用户。客服后台会显示 **用户 ID、账号、昵称**，可搜索这些字段；同一网站、同一用户 ID 在不同设备登录时恢复同一份聊天记录。未登录访客仍可咨询，其记录与登录账号分开保存。
 
 网站文件由你自行部署。下面的示例均保存在 Kivo 仓库中；不需要修改网站的登录流程或数据库结构。
@@ -23,7 +25,7 @@ Kivo v1.4.0 起支持网站登录用户。客服后台会显示 **用户 ID、�
 | `examples/php/KivoIdentity.php` | `app/Components/KivoIdentity.php` |
 | `examples/laravel54/app/Http/Controllers/KivoController.php` | `app/Http/Controllers/KivoController.php` |
 | `examples/laravel54/config/kivo.php` | `config/kivo.php` |
-| `examples/laravel54/resources/views/user/kivo.blade.php` | `resources/views/user/kivo.blade.php` |
+| `examples/laravel54/resources/views/user/kivo-verified.blade.php` | `resources/views/user/kivo-verified.blade.php` |
 
 在网站 `routes/web.php` 中新增这一条路由，放在要求登录的 `user` 中间件组之外。Laravel 的 web Session 中间件仍会生效，未登录时返回匿名身份，不跳转登录页面：
 
@@ -43,7 +45,7 @@ KIVO_IDENTITY_SECRET=从客服后台复制的64位密钥
 在 `resources/views/user/layouts.blade.php` 的底部，将现有 Salesmartly 客服 `<script>` **替换**为：
 
 ```blade
-@include('user.kivo')
+@include('user.kivo-verified')
 ```
 
 此模板在 Kivo 未启用或地址、网站 ID 未填写时保留原有客服脚本，启用后加载 Kivo，避免重复出现两个客服组件。网站登录页和其他布局如需显示客服，也可按需加入该模板。

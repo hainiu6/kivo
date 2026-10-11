@@ -6,7 +6,8 @@
   if (!siteId) { console.error('[Kivo] Missing data-site'); return; }
   window.__kivoWidget = true;
   const service = new URL(script.src).origin;
-  const key = `kivo:${service}:${siteId}`;
+  const visitorName = (script.getAttribute('data-visitor-name') || '').trim().slice(0,128).replace(/[\uD800-\uDBFF]$/,'');
+  const key = `kivo:${service}:${siteId}${visitorName ? ':name:' + JSON.stringify(visitorName) : ''}`;
   const identityPath = script.getAttribute('data-identity-url');
   let anonymousToken;
   try { anonymousToken = localStorage.getItem(key); } catch { /* storage may be blocked */ }
@@ -44,7 +45,7 @@
         identityToken = result.identityToken;
       }
       if (revision !== bootstrapRevision) return;
-      const res = await fetch(`${service}/api/widget/session`, {method:'POST',headers:{'Content-Type':'application/json'},credentials:'omit',body:JSON.stringify({siteId,visitorToken:identityToken ? undefined : anonymousToken,identityToken,page:location.href})});
+      const res = await fetch(`${service}/api/widget/session`, {method:'POST',headers:{'Content-Type':'application/json'},credentials:'omit',body:JSON.stringify({siteId,visitorToken:identityToken ? undefined : anonymousToken,identityToken,visitorName,page:location.href})});
       const data = await res.json();
       if (revision !== bootstrapRevision) return;
       if (!res.ok) throw new Error(data.error || '客服暂时不可用');
