@@ -200,12 +200,15 @@ function renderDetails(c) {
   $('#chat-empty').hidden=true; $('#chat-active').hidden=false; $('#visitor-empty').hidden=true;$('#visitor-details').hidden=false;
   $('#chat-name').textContent=c.name;$('#chat-meta').textContent=`${c.online?'访客在线':'访客离线'} · ${c.site_name}`;
   $('#chat-avatar').textContent=c.name.slice(-2);$('#visitor-avatar').textContent=c.name.slice(-2);$('#visitor-name').textContent=c.name;
+  $('#visitor-name').title=c.name;
   $('#visitor-status').textContent=c.online?'● 在线':'● 离线';$('#visitor-status').classList.toggle('offline',!c.online);
   $('#visitor-identity').textContent=c.user_id?'已验证的网站用户':c.visitor_name?'网站提供的名称':'匿名访客';$('#visitor-user-id').textContent=c.user_id||'—';$('#visitor-account').textContent=c.account||c.visitor_name||'—';$('#visitor-nickname').textContent=c.nickname||'—';
+  $('#visitor-user-id-field').hidden=!c.user_id;$('#visitor-account-field').hidden=!(c.account||c.visitor_name);$('#visitor-nickname-field').hidden=!c.nickname;
+  $('#visitor-user-group').hidden=!(c.user_id||c.account||c.visitor_name||c.nickname);
   $('#visitor-ip').textContent=c.ip;$('#visitor-region').textContent=c.region;$('#visitor-site').textContent=c.site_name;
   $('#visitor-os').textContent=c.os||'未知系统';$('#visitor-browser').textContent=c.browser||'未知浏览器';
-  $('#visitor-page').textContent=c.page;$('#visitor-page').href=c.page;
-  try{const page=new URL(c.page);$('#visitor-domain').textContent=page.host;$('#visitor-domain').href=page.origin;}catch{$('#visitor-domain').textContent='未知域名';$('#visitor-domain').removeAttribute('href');}
+  $('#visitor-page').textContent=c.page;$('#visitor-page').href=c.page;$('#visitor-page').title=c.page;
+  try{const page=new URL(c.page);$('#visitor-domain').textContent=page.host;$('#visitor-domain').href=page.origin;$('#visitor-page').textContent=page.pathname+page.search+page.hash;}catch{$('#visitor-domain').textContent='未知域名';$('#visitor-domain').removeAttribute('href');}
   $('#visitor-created').textContent=date(c.created_at);$('#visitor-updated').textContent=date(c.updated_at);
   $('#visitor-conversation-status').textContent=c.status==='closed'?'已结束':'进行中';
   $('#close-conversation').textContent=c.status==='closed'?'重新打开':'结束会话';$('#close-conversation').dataset.status=c.status;

@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag (e.g. v1.8.1); must be new'
+        description: 'Release tag (e.g. v1.8.2); must be new'
         required: true
-        default: v1.8.1
+        default: v1.8.2
   push:
     tags: ['v*']
 permissions:
@@ -65,5 +65,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '后台会话收件箱去掉整个三栏区域的外边框、圆角、阴影及外围留白，列表、聊天和访客信息铺满可用空间。' '删除“消息实时同步，历史记录自动保存。”提示条，释放聊天内容空间。' '通过 38 项测试及双架构容器、Debian 10 用户空间安装升级检查。浏览器核对无外框布局和提示条移除。' '执行 bash /opt/kivo/scripts/upgrade.sh 后强制刷新后台。保留聊天记录、图片、网站、30 天登录和 PHP 用户配置。' > release-notes.md
+          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '右下角客服按钮换为耳麦笑脸 SVG 图标；桌面图标从 26px 加大到 38px，窄屏使用 34px。支持主题色及原有呼吸、悬停和开关动效。' '优化会话收件箱右侧访客信息：顶部突出域名，路径精简显示且悬停可看完整地址；头像、名称、身份及在线状态紧凑排列；IP、地区突出显示。账号、设备和会话信息采用标签与值并排布局，自动隐藏无内容的用户 ID、账号及昵称。桌面资料栏略加宽，窄屏抽屉保持可用。' '通过 38 项测试及双架构容器、Debian 10 用户空间安装升级检查。浏览器核对新图标大小、按钮开关、匿名资料隐藏和资料栏布局。详见 docs/visitor-inspector.md。' '执行 bash /opt/kivo/scripts/upgrade.sh 后，强制刷新后台与接入客服的网站页面，加载新样式和 widget.js。保留聊天记录、图片、网站、30 天登录和 PHP 用户配置。' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md
