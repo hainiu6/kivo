@@ -48,12 +48,16 @@ KIVO_IDENTITY_SECRET=从客服后台复制的64位密钥
 
 此模板在 Kivo 未启用或地址、网站 ID 未填写时保留原有客服脚本，启用后加载 Kivo，避免重复出现两个客服组件。网站登录页和其他布局如需显示客服，也可按需加入该模板。
 
-如果网站使用了配置或视图缓存，在网站目录执行：
+新增路由及配置后，在网站服务器的项目目录执行（不是客服服务器的 `/opt/kivo`）：
 
 ```bash
 php artisan config:clear
+php artisan route:clear
 php artisan view:clear
+php artisan route:list --path=kivo
 ```
+
+路由列表应包含 `GET|HEAD kivo/identity` 和 `KivoController@identity`。然后在未登录的浏览器访问网站自己的 `/kivo/identity`，应返回 `{"identityToken":null}`；登录后返回带签名凭证的 JSON。该接口属于业务网站，例如 `https://126game.cc/kivo/identity`，不放在 Kivo 客服域名上。
 
 访问已登录网站后，打开客服发送一条消息，在 Kivo 会话右侧应看到「已验证网站用户」、对应用户 ID 和账号。
 
@@ -88,6 +92,7 @@ php artisan view:clear
 用户 ID、账号最多 128 个 UTF-16 代码单元，昵称最多 80 个，ID 与账号必填，昵称可为空；所有字段须为 UTF-8 且不含控制字符。PHP 和 Kivo 服务器时间应同步。
 
 - 接口返回 HTML / 登录跳转：检查是否把路由放进了强制登录中间件，或 PHP 路由未生效。
+- 接口显示「页面不存在」但 HTTP 状态为 200：网站自定义错误页也可能返回 200，仍不是有效身份接口。检查 PHP 文件是否已复制到线上网站、路由是否已添加并清除缓存；如果路由列表有该条目，检查宝塔 Laravel 伪静态是否将 `/kivo/identity` 转交给 `public/index.php`。
 - HTTP 503：检查网站后端四项配置，尤其密钥是否完整；不要把签名密钥或完整凭证贴到公开日志中。
 - 签名无效：网站 ID 和密钥必须来自同一个 Kivo 网站；重置后需更新 PHP 配置并清理配置缓存。
 - 仅显示匿名：检查网站 Session 是否已初始化，字段是否映射正确，嵌入代码是否含 `data-identity-url`。
