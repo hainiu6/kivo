@@ -39,7 +39,8 @@ kivo_docker() {
 kivo_probe_docker() {
   local result version
   if result="$(kivo_docker version --format '{{.Server.Version}}' 2>&1)"; then
-    version="$(printf '%s\n' "$result" | awk '/^[0-9]+\.[0-9]+\.[0-9]+[^[:space:]]*$/ {print;exit}')"
+    # Debian 10 ships mawk 1.3.3, which lacks POSIX character classes.
+    version="$(printf '%s\n' "$result" | awk '/^[0-9]+\.[0-9]+\.[0-9]+[-+_.0-9a-zA-Z]*$/ {print;exit}')"
     if [[ -n "$version" ]]; then DOCKER_SERVER_VERSION="$version"; return 0; fi
   fi
   KIVO_DOCKER_ERROR="$result"

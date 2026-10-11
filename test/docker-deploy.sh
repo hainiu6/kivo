@@ -20,6 +20,7 @@ case "$ARCH" in amd64) platform=x86_64;; arm64) platform=aarch64;; esac
 curl -fsSL --retry 3 "https://download.docker.com/linux/static/stable/$platform/docker-29.8.2.tgz" -o "$WORK/docker.tgz"
 tar -xzf "$WORK/docker.tgz" -C "$WORK/fixture" --strip-components=1 docker/docker
 docker build -t kivo/debian10-test -f "$REPO/test/debian10.Dockerfile" "$WORK/fixture"
+docker run --rm -v "$REPO:/repo:ro" kivo/debian10-test bash /repo/test/runtime-detection.sh
 python3 -m http.server 18088 --bind 127.0.0.1 --directory "$WORK/www" > "$WORK/http.log" 2>&1 &
 SERVER_PID=$!
 for ((i=0;i<30;i++)); do if curl -fsS http://127.0.0.1:18088/scripts/install.sh >/dev/null; then break; fi; sleep 1; done
