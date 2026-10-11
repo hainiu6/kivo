@@ -9,6 +9,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import bcrypt from 'bcryptjs';
 import geoip from 'geoip-lite';
+import { deviceInfo } from './device.js';
+import { MAX_IMAGE_BYTES, storeImage } from './media.js';
 
 const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -17,6 +19,7 @@ const now = () => Date.now();
 const text = (value, max = 200) => typeof value === 'string' ? value.trim().slice(0, max) : '';
 const uuid = value => typeof value === 'string' && /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(value);
 const validToken = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+const stickerIds = new Set(['hello', 'love', 'yay', 'laugh', 'cry', 'wait', 'coffee', 'thanks']);
 function originOf(value) { try { const u = new URL(value); return ['http:', 'https:'].includes(u.protocol) ? u.origin : ''; } catch { return ''; } }
 function safePage(value) { try { const u = new URL(value); if (!originOf(value)) return ''; u.username = ''; u.password = ''; return u.href.slice(0, 2048); } catch { return ''; } }
 function cookieToken(req) { const match = /(?:^|;\s*)kivo_session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie || ''); return match?.[1]; }
@@ -39,10 +42,25 @@ export function createKivo(options = {}) {
     CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS site_replies(site_id TEXT PRIMARY KEY REFERENCES sites(id), config TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS auto_reply_state(conversation_id TEXT PRIMARY KEY REFERENCES conversations(id), last_sent INTEGER NOT NULL);
-    PRAGMA user_version=2;`);
+    CREATE TABLE IF NOT EXISTS visitor_devices(conversation_id TEXT PRIMARY KEY REFERENCES conversations(id), os TEXT NOT NULL, browser TEXT NOT NULL, ua TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS media(id TEXT PRIMARY KEY, kind TEXT NOT NULL, conversation_id TEXT REFERENCES conversations(id), bytes INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, created_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS site_profiles(site_id TEXT PRIMARY KEY REFERENCES sites(id), support_name TEXT NOT NULL DEFAULT '在线客服', avatar_id TEXT REFERENCES media(id));`);
+  // Additive migration keeps older deployment and rollback images compatible.
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const columns = new Set(db.prepare('PRAGMA table_info(messages)').all().map(c => c.name));
+    if (!columns.has('kind')) db.exec("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'");
+    if (!columns.has('media_id')) db.exec('ALTER TABLE messages ADD COLUMN media_id TEXT REFERENCES media(id)');
+    if (!columns.has('sticker_id')) db.exec('ALTER TABLE messages ADD COLUMN sticker_id TEXT');
+    db.exec('PRAGMA user_version=3; COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); db.close(); throw e; }
   const defaultReplies = [{ label: '问候语', body: '你好，很高兴为你服务！' }, { label: '请稍候', body: '收到，请稍等，我帮你查看一下。' }, { label: '结束语', body: '感谢你的咨询，有其他问题随时联系我们。' }];
   const quickReplies = () => JSON.parse(db.prepare("SELECT value FROM settings WHERE key='quickReplies'").get()?.value || JSON.stringify(defaultReplies));
   const replyConfig = id => JSON.parse(db.prepare('SELECT config FROM site_replies WHERE site_id=?').get(id)?.config || '{"firstEnabled":false,"firstMessage":"","offlineEnabled":false,"offlineMessage":""}');
+  const siteProfile = id => {
+    const profile = db.prepare('SELECT * FROM site_profiles WHERE site_id=?').get(id);
+    return { supportName: profile?.support_name || '在线客服', avatarId: profile?.avatar_id || '', avatarUrl: profile?.avatar_id ? `/avatars/${profile.avatar_id}` : '/support-avatar.svg' };
+  };
   if (!db.prepare('SELECT id FROM users LIMIT 1').get()) {
     const password = options.adminPassword || process.env.ADMIN_PASSWORD;
     if (!password || password.length < 12) { db.close(); throw new Error('First start requires ADMIN_PASSWORD with at least 12 characters.'); }
@@ -90,7 +108,7 @@ export function createKivo(options = {}) {
     return [country, geo.region, geo.city].filter(Boolean).join(' · ');
   };
   const conversation = id => {
-    const c = db.prepare(`SELECT c.*, s.name AS site_name, (SELECT body FROM messages WHERE conversation_id=c.id ORDER BY id DESC LIMIT 1) AS last_message FROM conversations c JOIN sites s ON c.site_id=s.id WHERE c.id=?`).get(id);
+    const c = db.prepare(`SELECT c.*, s.name AS site_name, COALESCE(d.os,'未知系统') AS os, COALESCE(d.browser,'未知浏览器') AS browser, (SELECT CASE kind WHEN 'image' THEN '[图片] ' || body WHEN 'sticker' THEN '[动态表情]' ELSE body END FROM messages WHERE conversation_id=c.id ORDER BY id DESC LIMIT 1) AS last_message FROM conversations c JOIN sites s ON c.site_id=s.id LEFT JOIN visitor_devices d ON d.conversation_id=c.id WHERE c.id=?`).get(id);
     return c ? { ...c, visitor_hash: undefined, online: (visitors.get(id)?.size || 0) > 0 } : null;
   };
   const updateConversation = id => io.to('admins').emit('conversation:update', conversation(id));
@@ -99,13 +117,16 @@ export function createKivo(options = {}) {
     return db.prepare('SELECT * FROM messages WHERE conversation_id=? AND id<? ORDER BY id DESC LIMIT 100').all(id, limit).reverse();
   };
   function saveMessage(id, sender, data) {
-    if (!uuid(data?.clientId) || typeof data?.body !== 'string' || !data.body.trim() || data.body.length > 4000) throw new Error('消息须为 1–4000 字符');
+    const kind = data?.kind || 'text', body = typeof data?.body === 'string' ? data.body.trim() : '';
+    if (!uuid(data?.clientId) || !['text', 'image', 'sticker'].includes(kind) || (data?.body?.length || 0) > 4000 || (kind === 'text' && !body)) throw new Error('消息须为 1–4000 字符，或选择图片 / 表情');
     const existing = db.prepare('SELECT * FROM messages WHERE conversation_id=? AND sender=? AND client_id=?').get(id, sender, data.clientId);
     if (existing) return existing;
+    if (kind === 'image' && (!uuid(data.mediaId) || !db.prepare("SELECT id FROM media WHERE id=? AND kind='chat' AND conversation_id=?").get(data.mediaId, id))) throw new Error('图片不存在或不属于此会话');
+    if (kind === 'sticker' && !stickerIds.has(data.stickerId)) throw new Error('表情无效');
     db.exec('BEGIN IMMEDIATE');
     let result;
     try {
-      result = db.prepare('INSERT INTO messages(conversation_id,sender,body,client_id,created_at) VALUES(?,?,?,?,?)').run(id, sender, data.body.trim(), data.clientId, now());
+      result = db.prepare('INSERT INTO messages(conversation_id,sender,body,client_id,created_at,kind,media_id,sticker_id) VALUES(?,?,?,?,?,?,?,?)').run(id, sender, body, data.clientId, now(), kind, kind === 'image' ? data.mediaId : null, kind === 'sticker' ? data.stickerId : null);
       db.prepare(`UPDATE conversations SET updated_at=?, status='open', unread=unread+? WHERE id=?`).run(now(), sender === 'visitor' ? 1 : 0, id);
       if (sender === 'auto') db.prepare('INSERT INTO auto_reply_state VALUES(?,?) ON CONFLICT(conversation_id) DO UPDATE SET last_sent=excluded.last_sent').run(id, now());
       db.exec('COMMIT');
@@ -133,14 +154,36 @@ export function createKivo(options = {}) {
     if (req.path === '/widget') {
       const site = siteById(req.query.site);
       const origins = site ? JSON.parse(site.origins) : [];
-      res.set('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:; frame-ancestors 'self' ${origins.includes('*') ? 'http: https:' : origins.join(' ')}; base-uri 'none'; form-action 'self'`);
+      res.set('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' blob: data:; frame-ancestors 'self' ${origins.includes('*') ? 'http: https:' : origins.join(' ')}; base-uri 'none'; form-action 'self'`);
     } else if (!req.path.startsWith('/api/widget') && req.path !== '/widget.js') {
-      res.set({ 'X-Frame-Options': 'DENY', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" });
+      res.set({ 'X-Frame-Options': 'DENY', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' blob: data:; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" });
     }
     if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
     next();
   });
   app.get('/healthz', (_req, res) => { db.prepare('SELECT 1').get(); res.json({ status: 'ok' }); });
+  const visitorFor = req => {
+    const raw = req.headers.authorization?.replace(/^Bearer /, ''), siteId = req.headers['x-kivo-site'];
+    if (!validToken(raw) || !uuid(siteId)) return null;
+    return db.prepare('SELECT id,site_id FROM conversations WHERE site_id=? AND visitor_hash=?').get(siteId, hash(raw));
+  };
+  app.get('/api/media/:id', (req, res) => {
+    const media = uuid(req.params.id) && db.prepare("SELECT * FROM media WHERE id=? AND kind='chat'").get(req.params.id);
+    if (!media || (!sessionUser(req) && visitorFor(req)?.id !== media.conversation_id)) return res.status(404).json({ error: '图片不存在或无权访问' });
+    res.set({ 'Content-Type': 'image/webp', 'Cache-Control': 'private, no-store', 'Content-Disposition': 'inline; filename="chat-image.webp"' });
+    res.sendFile(path.resolve(dataDir, 'media', `${media.id}.webp`));
+  });
+  app.get('/avatars/:id', (req, res) => {
+    const media = uuid(req.params.id) && db.prepare("SELECT id FROM media WHERE id=? AND kind='avatar'").get(req.params.id);
+    if (!media) return res.sendStatus(404);
+    res.set({ 'Content-Type': 'image/webp', 'Cache-Control': 'public, max-age=86400' }); res.sendFile(path.resolve(dataDir, 'media', `${media.id}.webp`));
+  });
+  const imageLimiter = rateLimit({ windowMs: 60000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: '图片上传过于频繁，请稍后再试' } });
+  const imageBody = express.raw({ type: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'], limit: MAX_IMAGE_BYTES });
+  const upload = kind => async (req, res) => {
+    try { const media = await storeImage(db, dataDir, req.body, { kind, conversationId: req.uploadConversation || null }); res.status(201).json({ ...media, ...(kind === 'avatar' ? { avatarUrl: `/avatars/${media.id}` } : {}) }); }
+    catch (e) { res.status(400).json({ error: e.message }); }
+  };
   const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 15, standardHeaders: 'draft-8', legacyHeaders: false, skipSuccessfulRequests: true, message: { error: '登录尝试过多，请稍后重试' } });
   app.post('/api/login', sameOrigin, loginLimiter, async (req, res) => {
     const user = db.prepare('SELECT * FROM users WHERE username=?').get(text(req.body?.username));
@@ -156,6 +199,11 @@ export function createKivo(options = {}) {
   });
   app.use('/api/admin', adminOnly);
   app.use('/api/admin', (req, res, next) => ['GET', 'HEAD'].includes(req.method) ? next() : sameOrigin(req, res, next));
+  app.post('/api/admin/avatar', imageLimiter, imageBody, upload('avatar'));
+  app.post('/api/admin/conversations/:id/images', (req, res, next) => {
+    if (!uuid(req.params.id) || !conversation(req.params.id)) return res.status(404).json({ error: '会话不存在' });
+    req.uploadConversation = req.params.id; next();
+  }, imageLimiter, imageBody, upload('chat'));
   app.get('/api/admin/me', (req, res) => res.json({ username: req.user.username, publicUrl }));
   app.post('/api/admin/logout', (req, res) => {
     const raw = cookieToken(req);
@@ -184,7 +232,7 @@ export function createKivo(options = {}) {
     io.to('admins').emit('replies:update', replies);
     res.json({ ok: true });
   });
-  app.get('/api/admin/sites', (_req, res) => res.json(db.prepare('SELECT * FROM sites ORDER BY created_at').all().map(s => ({ ...s, origins: JSON.parse(s.origins), autoReply: replyConfig(s.id) }))));
+  app.get('/api/admin/sites', (_req, res) => res.json(db.prepare('SELECT * FROM sites ORDER BY created_at').all().map(s => ({ ...s, origins: JSON.parse(s.origins), autoReply: replyConfig(s.id), ...siteProfile(s.id) }))));
   function siteInput(body) {
     const name = text(body?.name, 60);
     const greeting = text(body?.greeting, 300) || '你好，欢迎联系我们！有什么可以帮你？';
@@ -196,7 +244,9 @@ export function createKivo(options = {}) {
     const input = body?.autoReply || {};
     const autoReply = { firstEnabled: input.firstEnabled === true, firstMessage: text(input.firstMessage, 2000), offlineEnabled: input.offlineEnabled === true, offlineMessage: text(input.offlineMessage, 2000) };
     if ((autoReply.firstEnabled && !autoReply.firstMessage) || (autoReply.offlineEnabled && !autoReply.offlineMessage) || [input.firstMessage, input.offlineMessage].some(v => typeof v === 'string' && v.length > 2000)) throw new Error('启用的自动回复须填写 1–2000 字符的内容');
-    return { name, greeting, color, origins: JSON.stringify(origins), autoReply };
+    const supportName = text(body?.supportName, 40) || '在线客服', avatarId = text(body?.avatarId, 36);
+    if (avatarId && (!uuid(avatarId) || !db.prepare("SELECT id FROM media WHERE id=? AND kind='avatar'").get(avatarId))) throw new Error('请上传有效的客服头像');
+    return { name, greeting, color, origins: JSON.stringify(origins), autoReply, supportName, avatarId };
   }
   function saveSite(id, s, create) {
     db.exec('BEGIN IMMEDIATE');
@@ -204,6 +254,7 @@ export function createKivo(options = {}) {
       if (create) db.prepare('INSERT INTO sites VALUES(?,?,?,?,?,?)').run(id, s.name, s.origins, s.color, s.greeting, now());
       else db.prepare('UPDATE sites SET name=?,origins=?,color=?,greeting=? WHERE id=?').run(s.name, s.origins, s.color, s.greeting, id);
       db.prepare('INSERT INTO site_replies VALUES(?,?) ON CONFLICT(site_id) DO UPDATE SET config=excluded.config').run(id, JSON.stringify(s.autoReply));
+      db.prepare('INSERT INTO site_profiles VALUES(?,?,?) ON CONFLICT(site_id) DO UPDATE SET support_name=excluded.support_name,avatar_id=excluded.avatar_id').run(id, s.supportName, s.avatarId || null);
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
   }
@@ -213,7 +264,7 @@ export function createKivo(options = {}) {
   });
   app.put('/api/admin/sites/:id', (req, res) => {
     if (!siteById(req.params.id)) return res.status(404).json({ error: '网站不存在' });
-    try { const s = siteInput(req.body); if (req.body.autoReply === undefined) s.autoReply = replyConfig(req.params.id); saveSite(req.params.id, s, false); res.json({ ok: true }); }
+    try { const s = siteInput(req.body), profile = siteProfile(req.params.id); if (req.body.autoReply === undefined) s.autoReply = replyConfig(req.params.id); if (req.body.supportName === undefined) s.supportName = profile.supportName; if (req.body.avatarId === undefined) s.avatarId = profile.avatarId; saveSite(req.params.id, s, false); res.json({ ok: true }); }
     catch (e) { res.status(400).json({ error: e.message }); }
   });
   app.get('/api/admin/conversations', (req, res) => {
@@ -244,11 +295,16 @@ export function createKivo(options = {}) {
   });
   app.use('/api/widget', (req, res, next) => {
     const origin = req.headers.origin;
-    if (origin && isKnownOrigin(origin)) res.set({ 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Vary': 'Origin' });
+    if (origin && isKnownOrigin(origin)) res.set({ 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Kivo-Site', 'Vary': 'Origin' });
     if (req.method === 'OPTIONS') return res.sendStatus(origin && isKnownOrigin(origin) ? 204 : 403);
     next();
   });
   const visitorLimiter = rateLimit({ windowMs: 60000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: '请求过于频繁，请稍后再试' } });
+  app.post('/api/widget/images', (req, res, next) => {
+    const c = visitorFor(req);
+    if (!c || !siteAllows(siteById(c.site_id), req.headers.origin)) return res.status(403).json({ error: '访客凭证或来源无效' });
+    req.uploadConversation = c.id; next();
+  }, imageLimiter, imageBody, upload('chat'));
   app.post('/api/widget/session', visitorLimiter, (req, res) => {
     const site = siteById(req.body?.siteId);
     if (!siteAllows(site, req.headers.origin)) return res.status(403).json({ error: '网站未授权，请检查后台允许来源' });
@@ -262,8 +318,10 @@ export function createKivo(options = {}) {
       c = { id: randomUUID() };
       db.prepare('INSERT INTO conversations(id,site_id,visitor_hash,name,ip,region,page,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)').run(c.id, site.id, visitorHash, `访客 ${c.id.slice(0, 6).toUpperCase()}`, ip, regionOf(ip), page, now(), now());
     } else db.prepare('UPDATE conversations SET ip=?,region=?,page=? WHERE id=?').run(ip,regionOf(ip),page,c.id);
+    const device = deviceInfo(req.headers['user-agent']);
+    db.prepare('INSERT INTO visitor_devices VALUES(?,?,?,?) ON CONFLICT(conversation_id) DO UPDATE SET os=excluded.os,browser=excluded.browser,ua=excluded.ua').run(c.id, device.os, device.browser, device.ua);
     updateConversation(c.id);
-    res.json({ visitorToken: raw, conversationId: c.id, site: { id: site.id, name: site.name, color: site.color, greeting: site.greeting } });
+    res.json({ visitorToken: raw, conversationId: c.id, site: { id: site.id, name: site.name, color: site.color, greeting: site.greeting, ...siteProfile(site.id) } });
   });
   io.use((socket, next) => {
     const auth = socket.handshake.auth || {};

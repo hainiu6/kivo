@@ -11,6 +11,7 @@ chmod 700 "$ROOT/backups" "$DEST"
 docker compose exec -T app node scripts/db-backup.js "/app/data/backup-$STAMP.sqlite"
 mv "data/backup-$STAMP.sqlite" "$DEST/kivo.sqlite"
 cp .env "$DEST/.env"
+if [[ -d data/media ]]; then cp -a data/media "$DEST/media"; fi
 git rev-parse HEAD > "$DEST/revision"
 chmod 600 "$DEST/kivo.sqlite" "$DEST/.env" "$DEST/revision"
 echo "备份已保存：$DEST"

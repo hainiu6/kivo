@@ -44,9 +44,14 @@ run_debian "$WORK/www/scripts/install.sh"
 grep -qx 'HTTP_PORT=8088' "$ROOT/.env"
 curl --fail http://127.0.0.1:8088/healthz
 docker exec kivo-ci node -e "const {DatabaseSync}=require('node:sqlite'); const d=new DatabaseSync('/app/data/kivo.sqlite');d.exec('CREATE TABLE deployment_probe (value TEXT); INSERT INTO deployment_probe VALUES (\"retained\")'.replaceAll('\"',\"'\"));"
+# Image files live beside SQLite and must be copied by backup and retained by upgrades.
+docker exec kivo-ci node --input-type=module -e 'import sharp from "sharp"; import {mkdir,writeFile} from "node:fs/promises";await mkdir("/app/data/media",{recursive:true,mode:0o700});await writeFile("/app/data/media/deployment-probe.webp",await sharp({create:{width:20,height:20,channels:4,background:"#efc452"}}).webp().toBuffer(),{mode:0o600});'
 run_debian "$ROOT/scripts/backup.sh"
 [[ "$(find "$ROOT/backups" -name kivo.sqlite | wc -l)" -ge 1 ]]
+[[ "$(find "$ROOT/backups" -name deployment-probe.webp | wc -l)" -ge 1 ]]
+MEDIA_CHECKSUM="$(sha256sum "$ROOT/data/media/deployment-probe.webp" | awk '{print $1}')"
 run_debian "$ROOT/scripts/upgrade.sh"
+[[ "$(sha256sum "$ROOT/data/media/deployment-probe.webp" | awk '{print $1}')" == "$MEDIA_CHECKSUM" ]]
 docker exec kivo-ci node -e "const {DatabaseSync}=require('node:sqlite');if(new DatabaseSync('/app/data/kivo.sqlite').prepare('SELECT value FROM deployment_probe').get().value!=='retained')process.exit(1);"
 # A second deployment detects the occupied default port, preserving the first.
 TEST_ROOT="$COLLISION_ROOT" TEST_CONTAINER=kivo-ci-collision run_debian "$WORK/www/scripts/install.sh"

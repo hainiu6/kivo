@@ -1,10 +1,12 @@
-/* global io */
+/* global io, KivoChat */
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 let socket, publicUrl, sites = [], conversations = [], activeId = null, activeMessages = [], status = 'open', view = 'inbox', selectionRevision = 0, listRevision = 0;
 let loadingMessages = false, sending = false, toastTimer;
 let pendingMessages = [];
 let replies = [];
+let avatarUploading=false, avatarRevision=0;
+const composer = KivoChat.composer({form:$('#message-form'),input:$('#message-input'),tools:$('#chat-tools'),preview:$('#attachment-preview'),getContext:()=>socket?.connected&&!loadingMessages&&!sending?activeId:'',uploadUrl:id=>`/api/admin/conversations/${id}/images`,onError:message=>$('#send-error').textContent=message,onSubmitLock:locked=>$('#send-message').disabled=locked||sending||loadingMessages||!socket?.connected});
 const drafts = new Map();
 const date = ms => new Date(ms).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
 const clock = ms => new Date(ms).toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit', hour12:false });
@@ -17,7 +19,7 @@ async function api(url, options = {}) {
   return data;
 }
 const post = (url, data = {}) => api(url,{method:'POST',body:JSON.stringify(data)});
-function showLogin() { socket?.disconnect(); $('#workspace').hidden = true; $('#login-screen').hidden = false; activeId = null; $('#chat-empty').hidden = false; $('#chat-active').hidden = true; $('#visitor-empty').hidden = false; $('#visitor-details').hidden = true; }
+function showLogin() { socket?.disconnect(); composer.destroy(); KivoChat.clearImages(); $('#workspace').hidden = true; $('#login-screen').hidden = false; activeId = null; $('#chat-empty').hidden = false; $('#chat-active').hidden = true; $('#visitor-empty').hidden = false; $('#visitor-details').hidden = true; }
 function switchView(next) {
   view = next; ['inbox','sites','replies','settings'].forEach(v => $(`#view-${v}`).hidden = v !== next);
   $('#workspace').classList.toggle('inbox-mode', next === 'inbox');
@@ -34,7 +36,7 @@ async function start() {
   $('#login-screen').hidden = true; $('#workspace').hidden = false;
   socket?.disconnect(); socket = io({ auth:{role:'admin'}, reconnection:true });
   socket.on('connect', () => {
-    $('#connection-label').textContent = '在线接待中'; $('#connection-dot').classList.remove('offline'); $('#send-message').disabled = false;
+    $('#connection-label').textContent = '在线接待中'; $('#connection-dot').classList.remove('offline'); $('#send-message').disabled = sending||composer.isUploading();
     loadConversations().catch(e => toast(e.message));
     if (activeId) selectConversation(activeId).catch(e => toast(e.message));
   });
@@ -110,6 +112,7 @@ function renderDetails(c) {
   $('#chat-avatar').textContent=c.name.slice(-2);$('#visitor-avatar').textContent=c.name.slice(-2);$('#visitor-name').textContent=c.name;
   $('#visitor-status').textContent=c.online?'● 在线':'● 离线';$('#visitor-status').classList.toggle('offline',!c.online);
   $('#visitor-ip').textContent=c.ip;$('#visitor-region').textContent=c.region;$('#visitor-site').textContent=c.site_name;
+  $('#visitor-os').textContent=c.os||'未知系统';$('#visitor-browser').textContent=c.browser||'未知浏览器';
   $('#visitor-page').textContent=c.page;$('#visitor-page').href=c.page;
   $('#visitor-created').textContent=date(c.created_at);$('#visitor-updated').textContent=date(c.updated_at);
   $('#visitor-conversation-status').textContent=c.status==='closed'?'已结束':'进行中';
@@ -117,6 +120,7 @@ function renderDetails(c) {
 }
 async function selectConversation(id) {
   if (activeId) drafts.set(activeId,$('#message-input').value);
+  if(activeId!==id){composer.clear();composer.closePicker();KivoChat.clearImages();}
   activeId=id;const revision=++selectionRevision;loadingMessages=true;pendingMessages=[];
   renderConversations();const c=conversations.find(c=>c.id===id);if(c)renderDetails(c);
   $('.inbox-grid').classList.add('chat-selected');$('#message-items').replaceChildren(element('div','muted','正在加载对话…'));
@@ -132,7 +136,7 @@ function renderMessages() {
   const container=$('#message-items');container.replaceChildren();
   if(!activeMessages.length)container.append(element('p','muted','访客还没有发送消息。用一句问候开始对话吧。'));
   activeMessages.forEach(m=>{
-    const row=element('div',`message-row ${m.sender}`);row.append(element('div','message-meta',`${m.sender==='auto'?'自动回复':m.sender==='agent'?'客服':'访客'} · ${date(m.created_at)}`),element('div','bubble',m.body));container.append(row);
+    const row=element('div',`message-row ${m.sender}`);row.append(element('div','message-meta',`${m.sender==='auto'?'自动回复':m.sender==='agent'?'客服':'访客'} · ${date(m.created_at)}`),KivoChat.renderMessage(m,{onImageLoad:()=>{const panel=$('#messages');if(panel.scrollHeight-panel.scrollTop-panel.clientHeight<260)panel.scrollTop=panel.scrollHeight;}}));container.append(row);
   });
 }
 function addMessage(m) {
@@ -161,6 +165,7 @@ function renderSites() {
 }
 function openSite(s) {
   const f=$('#site-form');f.reset();f.elements.id.value=s?.id||'';f.elements.name.value=s?.name||'';f.elements.origins.value=s?.origins.join('\n')||'';f.elements.color.value=s?.color||'#0f766e';f.elements.greeting.value=s?.greeting||'你好，欢迎联系我们！有什么可以帮你？';$('#site-form-title').textContent=s?'编辑网站':'添加网站';$('#site-error').textContent='';$('#site-dialog').showModal();
+  avatarRevision++;avatarUploading=false;f.elements.supportName.value=s?.supportName||'在线客服';f.elements.avatarId.value=s?.avatarId||'';$('#avatar-preview').src=s?.avatarUrl||'/support-avatar.svg';f.querySelector('[type="submit"]').disabled=false;
   f.elements.allowAll.checked = s?.origins.includes('*') || false;
   if(f.elements.allowAll.checked) f.elements.origins.value = '';
   for(const key of ['firstEnabled','offlineEnabled']) f.elements[key].checked = s?.autoReply?.[key] || false;
@@ -184,18 +189,29 @@ $('#add-reply').onclick=()=>{if($('#reply-editor').children.length<20)appendRepl
 $('#replies-form').onsubmit=async e=>{e.preventDefault();const b=e.currentTarget.querySelector('[type="submit"]');b.disabled=true;$('#replies-error').textContent='';const rows=[...$('#reply-editor').children].map(row=>({label:row.querySelector('[data-field="label"]').value,body:row.querySelector('[data-field="body"]').value}));try{await api('/api/admin/replies',{method:'PUT',body:JSON.stringify(rows)});await loadReplies();toast('常用话术已保存');}catch(e){$('#replies-error').textContent=e.message;}finally{b.disabled=false;}};
 $('#message-input').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();$('#message-form').requestSubmit();}};
 $('#message-form').onsubmit=e=>{
-  e.preventDefault();if(!activeId||loadingMessages||sending)return;const body=$('#message-input').value.trim();if(!body)return;
+  e.preventDefault();if(!activeId||loadingMessages||sending||composer.isUploading())return;const body=$('#message-input').value.trim();if(!body&&!composer.hasAttachment())return;
   if(!socket?.connected){$('#send-error').textContent='连接已断开，请等待重新连接后发送';return;}
   const id=activeId;const clientId=window.kivoMessageId();sending=true;$('#send-message').disabled=true;$('#send-error').textContent='';
-  socket.timeout(8000).emit('message:send',{conversationId:id,body,clientId},(error,result)=>{
+  const attachment=composer.payload();
+  socket.timeout(8000).emit('message:send',{...attachment,conversationId:id,body,clientId},(error,result)=>{
     sending=false;$('#send-message').disabled=!socket.connected;
     if(error||!result?.ok){$('#send-error').textContent=error?'未收到发送确认，请刷新检查聊天记录后重试':result.error;return;}
-    drafts.delete(id);if(activeId===id){addMessage(result.message);if($('#message-input').value.trim()===body)$('#message-input').value='';}
+    drafts.delete(id);if(activeId===id){addMessage(result.message);composer.clear();if($('#message-input').value.trim()===body)$('#message-input').value='';}
   });
 };
 $('#older-messages').onclick=async()=>{const id=activeId,button=$('#older-messages');button.disabled=true;try{const rows=await api(`/api/admin/conversations/${id}/messages?before=${activeMessages[0]?.id||0}`);if(id!==activeId)return;const height=$('#messages').scrollHeight;activeMessages=[...rows,...activeMessages];renderMessages();$('#messages').scrollTop+=$('#messages').scrollHeight-height;button.hidden=rows.length<100;}catch(e){toast(e.message);}finally{button.disabled=false;}};
 $('#add-site').onclick=()=>openSite();$('#close-dialog').onclick=()=>$('#site-dialog').close();
-$('#site-form').onsubmit=async e=>{e.preventDefault();const f=e.currentTarget,b=f.querySelector('[type="submit"]');b.disabled=true;$('#site-error').textContent='';const fields=Object.fromEntries(new FormData(f));fields.origins=(fields.origins||'').split(/\n|,/).map(v=>v.trim()).filter(Boolean);fields.allowAll=f.elements.allowAll.checked;fields.autoReply={firstEnabled:f.elements.firstEnabled.checked,firstMessage:f.elements.firstMessage.value,offlineEnabled:f.elements.offlineEnabled.checked,offlineMessage:f.elements.offlineMessage.value};try{await api(fields.id?`/api/admin/sites/${fields.id}`:'/api/admin/sites',{method:fields.id?'PUT':'POST',body:JSON.stringify(fields)});await loadSites();$('#site-dialog').close();toast('网站设置已保存');}catch(e){$('#site-error').textContent=e.message;}finally{b.disabled=false;}};
+$('#site-dialog').addEventListener('close',()=>{avatarRevision++;avatarUploading=false;});
+$('#avatar-file').onchange=async e=>{
+  const image=e.target.files[0];e.target.value='';if(!image)return;
+  if(!['image/png','image/jpeg','image/gif','image/webp'].includes(image.type)||image.size>5*1024*1024){$('#site-error').textContent='头像须为不超过 5 MB 的 PNG、JPEG、GIF 或 WebP';return;}
+  const revision=++avatarRevision,b=$('#site-form').querySelector('[type="submit"]');avatarUploading=true;b.disabled=true;$('#site-error').textContent='正在上传头像…';
+  try{const r=await fetch('/api/admin/avatar',{method:'POST',headers:{'Content-Type':image.type},body:image});const data=await r.json();if(!r.ok)throw new Error(data.error||'头像上传失败');if(revision!==avatarRevision)return;$('#site-form').elements.avatarId.value=data.id;$('#avatar-preview').src=data.avatarUrl;$('#site-error').textContent='';}
+  catch(e){if(revision===avatarRevision)$('#site-error').textContent=e.message;}
+  finally{if(revision===avatarRevision){avatarUploading=false;b.disabled=false;}}
+};
+$('#reset-avatar').onclick=()=>{avatarRevision++;avatarUploading=false;$('#site-form').elements.avatarId.value='';$('#avatar-preview').src='/support-avatar.svg';$('#site-form').querySelector('[type="submit"]').disabled=false;$('#site-error').textContent='';};
+$('#site-form').onsubmit=async e=>{e.preventDefault();if(avatarUploading)return;const f=e.currentTarget,b=f.querySelector('[type="submit"]');b.disabled=true;$('#site-error').textContent='';const fields=Object.fromEntries(new FormData(f));fields.origins=(fields.origins||'').split(/\n|,/).map(v=>v.trim()).filter(Boolean);fields.allowAll=f.elements.allowAll.checked;fields.autoReply={firstEnabled:f.elements.firstEnabled.checked,firstMessage:f.elements.firstMessage.value,offlineEnabled:f.elements.offlineEnabled.checked,offlineMessage:f.elements.offlineMessage.value};try{await api(fields.id?`/api/admin/sites/${fields.id}`:'/api/admin/sites',{method:fields.id?'PUT':'POST',body:JSON.stringify(fields)});await loadSites();$('#site-dialog').close();toast('网站设置已保存');}catch(e){$('#site-error').textContent=e.message;}finally{b.disabled=false;}};
 $('#password-form').onsubmit=async e=>{e.preventDefault();const f=e.currentTarget,data=Object.fromEntries(new FormData(f));if(data.newPassword!==data.confirmPassword){toast('两次输入的新密码不一致');return;}const b=f.querySelector('button');b.disabled=true;try{await post('/api/admin/password',data);f.reset();showLogin();toast('密码已更新，请重新登录');}catch(e){toast(e.message);}finally{b.disabled=false;}};
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&socket?.connected){if(activeId)selectConversation(activeId).catch(e=>toast(e.message));loadConversations().catch(e=>toast(e.message));}});
 start().catch(e=>{showLogin();if(!e.message.includes('先登录'))$('#login-error').textContent=e.message;});
