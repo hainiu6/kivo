@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag (e.g. v1.8.0); must be new'
+        description: 'Release tag (e.g. v1.8.1); must be new'
         required: true
-        default: v1.8.0
+        default: v1.8.1
   push:
     tags: ['v*']
 permissions:
@@ -65,5 +65,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '新消息提示音改为简洁的一声叮；放大左下角声音、接待状态与账号图标。' '新增客服在线／离线开关，所有后台实时同步，刷新和重启保留。主动离线后访客看到离线状态，并使用已配置的离线自动回复；后台仍能接收和回复消息。所有工作台断开时自动对外离线。' '会话卡片改为两行：第一行名称、在线／离线文字及时间，第二行消息摘要、网站及未读数。卡片高度 54px，绿色在线、灰色离线。收件箱显示全部网站的当前在线访客数，按会话去重，不受搜索、状态、网站筛选及列表上限影响。' '通过 38 项测试，覆盖接待状态权限、多个后台同步、实时在线人数、多标签去重、离线自动回复、删除、退出、重启保留及单声提示音。浏览器实测开关、刷新、两行布局与图标显示。详见 docs/support-presence.md。' '执行 bash /opt/kivo/scripts/upgrade.sh 后强制刷新后台。保留聊天记录、图片、网站、30 天登录和 PHP 用户配置。' > release-notes.md
+          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '后台会话收件箱去掉整个三栏区域的外边框、圆角、阴影及外围留白，列表、聊天和访客信息铺满可用空间。' '删除“消息实时同步，历史记录自动保存。”提示条，释放聊天内容空间。' '通过 38 项测试及双架构容器、Debian 10 用户空间安装升级检查。浏览器核对无外框布局和提示条移除。' '执行 bash /opt/kivo/scripts/upgrade.sh 后强制刷新后台。保留聊天记录、图片、网站、30 天登录和 PHP 用户配置。' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md
