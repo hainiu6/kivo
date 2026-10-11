@@ -6,6 +6,7 @@ ROOT="${ROOT:-/opt/kivo}"
 kivo_host_check
 mkdir -p "$ROOT/runtime"
 DOCKER_SOCKET=''
+DOCKER_NETWORK=bridge
 if command -v docker >/dev/null; then
   DOCKER_BIN="$(command -v docker)"
   # Always select the local daemon; a remote/context endpoint must not receive host bind mounts.
@@ -36,7 +37,8 @@ else
   printf '{"features":{"containerd-snapshotter":false}}\n' > "$ROOT/runtime/daemon.json"
   DOCKER_BIN="$ROOT/runtime/docker/docker"
   DOCKER_SOCKET=unix:///run/kivo-docker.sock
-  printf 'DOCKER_BIN=%s\nDOCKER_SOCKET=%s\n' "$DOCKER_BIN" "$DOCKER_SOCKET" > "$ROOT/runtime.env"
+  DOCKER_NETWORK=kivo
+  printf 'DOCKER_BIN=%s\nDOCKER_SOCKET=%s\nDOCKER_NETWORK=%s\n' "$DOCKER_BIN" "$DOCKER_SOCKET" "$DOCKER_NETWORK" > "$ROOT/runtime.env"
   chmod 600 "$ROOT/runtime.env"
   cat > "$unit" <<UNIT
 # Managed by Kivo: $ROOT
@@ -46,7 +48,7 @@ After=network-online.target
 Wants=network-online.target
 [Service]
 Environment=PATH=$ROOT/runtime/docker:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=$ROOT/runtime/docker/dockerd --config-file=$ROOT/runtime/daemon.json --host=$DOCKER_SOCKET --data-root=$ROOT/docker-data --exec-root=/run/kivo-docker --pidfile=/run/kivo-docker.pid --bridge=kivo0 --default-address-pool=base=10.248.0.0/16,size=24
+ExecStart=$ROOT/runtime/docker/dockerd --config-file=$ROOT/runtime/daemon.json --host=$DOCKER_SOCKET --data-root=$ROOT/docker-data --exec-root=/run/kivo-docker --pidfile=/run/kivo-docker.pid --bridge=none --default-address-pool=base=10.248.0.0/16,size=24
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=120
@@ -67,6 +69,8 @@ UNIT
     journalctl -u kivo-docker.service --no-pager -n 40 >&2 || true
     kivo_error '独立 Docker 启动失败。请检查上述日志；没有修改系统 Docker 或 apt 软件包。'
   fi
+  # Let Docker create/configure a private bridge and choose a non-overlapping subnet.
+  kivo_docker network create --driver bridge --opt com.docker.network.bridge.name=kivo0 kivo >/dev/null
 fi
-printf 'DOCKER_BIN=%s\nDOCKER_SOCKET=%s\n' "$DOCKER_BIN" "$DOCKER_SOCKET" > "$ROOT/runtime.env"
+printf 'DOCKER_BIN=%s\nDOCKER_SOCKET=%s\nDOCKER_NETWORK=%s\n' "$DOCKER_BIN" "$DOCKER_SOCKET" "$DOCKER_NETWORK" > "$ROOT/runtime.env"
 chmod 600 "$ROOT/runtime.env"

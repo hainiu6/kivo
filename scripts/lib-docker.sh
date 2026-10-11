@@ -23,6 +23,7 @@ kivo_host_check() {
 kivo_docker_init() {
   DOCKER_BIN="$(kivo_get "$ROOT/runtime.env" DOCKER_BIN)"
   DOCKER_SOCKET="$(kivo_get "$ROOT/runtime.env" DOCKER_SOCKET)"
+  DOCKER_NETWORK="$(kivo_get "$ROOT/runtime.env" DOCKER_NETWORK)"; DOCKER_NETWORK="${DOCKER_NETWORK:-bridge}"
   [[ -n "$DOCKER_BIN" && -x "$DOCKER_BIN" ]] || kivo_error 'Docker 运行时配置不存在，请重新运行安装脚本。'
   # Configuration is parsed as data, never sourced as shell code.
   [[ "$DOCKER_BIN" == /* ]] || kivo_error 'Docker 路径必须为绝对路径。'
@@ -60,7 +61,7 @@ kivo_run() {
     --restart unless-stopped --init --read-only --security-opt no-new-privileges:true \
     --tmpfs /tmp:rw,noexec,nosuid,size=64m --log-opt max-size=10m --log-opt max-file=3 \
     --env-file "$ROOT/.env" --env DATA_DIR=/app/data --env NODE_ENV=production --env PORT=3000 \
-    --publish "$BIND_HOST:$HTTP_PORT:3000" --mount "type=bind,src=$ROOT/data,dst=/app/data" "$image"
+    --network "$DOCKER_NETWORK" --publish "$BIND_HOST:$HTTP_PORT:3000" --mount "type=bind,src=$ROOT/data,dst=/app/data" "$image"
 }
 kivo_fetch_bundle() {
   local work="$1" version arch base asset digest

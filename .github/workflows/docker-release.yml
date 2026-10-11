@@ -37,6 +37,7 @@ jobs:
           IMAGE="kivo/app:${VERSION#v}-${GITHUB_SHA:0:7}-$ARCH"
           docker build -t "$IMAGE" .
           sudo bash test/docker-deploy.sh "$IMAGE" "$ARCH" "$GITHUB_SHA"
+          sudo bash test/docker-runtime.sh "$IMAGE"
           bash scripts/package-release.sh "$VERSION" "$ARCH" "$IMAGE" "$GITHUB_SHA" dist
       - uses: actions/upload-artifact@v4
         with:
