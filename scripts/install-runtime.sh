@@ -7,14 +7,8 @@ kivo_host_check
 mkdir -p "$ROOT/runtime"
 DOCKER_SOCKET=''
 DOCKER_NETWORK=bridge
-if command -v docker >/dev/null; then
-  DOCKER_BIN="$(command -v docker)"
-  # Always select the local daemon; a remote/context endpoint must not receive host bind mounts.
-  DOCKER_SOCKET=unix:///var/run/docker.sock
-  kivo_docker info >/dev/null 2>&1 || kivo_error '检测到已有 Docker，但本机 /var/run/docker.sock 不可用。请先启动已有 Docker；安装器不会重装或重启它。'
-  docker_version="$(kivo_docker version --format '{{.Server.Version}}')"
-  minimum=20.10.10
-  [[ "$(printf '%s\n%s\n' "$minimum" "$docker_version" | sort -V | head -n1)" == "$minimum" ]] || kivo_error '已有 Docker 版本过旧，需要 20.10.10+；请维护原 Docker 后重试。'
+if kivo_use_existing_docker; then
+  :
 else
   for command in systemctl iptables ps mount; do command -v "$command" >/dev/null || kivo_error "缺少 $command；独立 Docker 运行时需要此系统组件，安装器不会调用 apt。"; done
   [[ -d /sys/fs/cgroup ]] || kivo_error '系统未挂载 cgroups。'
@@ -72,5 +66,4 @@ UNIT
   # Let Docker create/configure a private bridge and choose a non-overlapping subnet.
   kivo_docker network create --driver bridge --opt com.docker.network.bridge.name=kivo0 kivo >/dev/null
 fi
-printf 'DOCKER_BIN=%s\nDOCKER_SOCKET=%s\nDOCKER_NETWORK=%s\n' "$DOCKER_BIN" "$DOCKER_SOCKET" "$DOCKER_NETWORK" > "$ROOT/runtime.env"
-chmod 600 "$ROOT/runtime.env"
+kivo_save_runtime

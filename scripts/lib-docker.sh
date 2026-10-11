@@ -28,10 +28,65 @@ kivo_docker_init() {
   # Configuration is parsed as data, never sourced as shell code.
   [[ "$DOCKER_BIN" == /* ]] || kivo_error 'Docker 路径必须为绝对路径。'
   [[ -z "$DOCKER_SOCKET" || "$DOCKER_SOCKET" == unix:///* ]] || kivo_error '仅支持本机 Unix socket。'
-  kivo_docker info >/dev/null 2>&1 || kivo_error 'Docker 不可用；已有 Docker 不会被自动重装或重启。'
+  kivo_probe_docker || kivo_docker_diagnose
 }
 kivo_docker() {
-  if [[ -n "${DOCKER_SOCKET:-}" ]]; then "$DOCKER_BIN" --host "$DOCKER_SOCKET" "$@"; else "$DOCKER_BIN" "$@"; fi
+  # Explicit local endpoint: inherited TLS/context/API overrides must not redirect this command.
+  if [[ -n "${DOCKER_SOCKET:-}" ]]; then
+    env -u DOCKER_HOST -u DOCKER_CONTEXT -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH -u DOCKER_API_VERSION "$DOCKER_BIN" --host "$DOCKER_SOCKET" "$@"
+  else "$DOCKER_BIN" "$@"; fi
+}
+kivo_probe_docker() {
+  local result version
+  if result="$(kivo_docker version --format '{{.Server.Version}}' 2>&1)"; then
+    version="$(printf '%s\n' "$result" | awk '/^[0-9]+\.[0-9]+\.[0-9]+[^[:space:]]*$/ {print;exit}')"
+    if [[ -n "$version" ]]; then DOCKER_SERVER_VERSION="$version"; return 0; fi
+  fi
+  KIVO_DOCKER_ERROR="$result"
+  return 1
+}
+kivo_docker_diagnose() {
+  printf 'Kivo Docker 检查失败\n主机：%s\n客户端：%s\n连接：%s\n' "$(hostname)" "$DOCKER_BIN" "$DOCKER_SOCKET" >&2
+  printf 'Docker 原始错误：\n%s\n' "${KIVO_DOCKER_ERROR:-未收到服务端版本。}" >&2
+  echo '请在这台主机执行：systemctl status docker --no-pager -l；journalctl -u docker -n 30 --no-pager。已有 Docker 不会被重装或重启。' >&2
+  exit 1
+}
+kivo_use_existing_docker() {
+  local selected context_endpoint load_state state i
+  command -v docker >/dev/null || return 1
+  DOCKER_BIN="$(command -v docker)"
+  DOCKER_NETWORK=bridge
+  selected="${KIVO_DOCKER_SOCKET:-${DOCKER_HOST:-}}"
+  if [[ -z "$selected" ]]; then
+    context_endpoint="$(env -u DOCKER_HOST "$DOCKER_BIN" context inspect --format '{{(index .Endpoints "docker").Host}}' 2>/dev/null || true)"
+    selected="${context_endpoint:-unix:///run/docker.sock}"
+  fi
+  [[ "$selected" == unix:///* && "$selected" != *[[:space:]]* ]] || kivo_error 'Docker 接入仅支持本机 Unix socket。可用 KIVO_DOCKER_SOCKET=unix:///run/docker.sock 指定本机服务，不能挂载数据到远程 Docker。'
+  DOCKER_SOCKET="$selected"
+  if ! kivo_probe_docker; then
+    # /var/run is normally a symlink; also support hosts where it is a separate directory.
+    if [[ "$selected" == unix:///var/run/docker.sock ]]; then DOCKER_SOCKET=unix:///run/docker.sock; kivo_probe_docker || DOCKER_SOCKET="$selected"; fi
+    if ! kivo_probe_docker; then
+      if [[ "$DOCKER_SOCKET" == unix:///run/docker.sock || "$DOCKER_SOCKET" == unix:///var/run/docker.sock ]] && command -v systemctl >/dev/null; then
+        load_state="$(systemctl show docker.service --property=LoadState --value 2>/dev/null || true)"
+        state="$(systemctl is-active docker.service 2>/dev/null || true)"
+        if [[ "$load_state" == loaded && ( "$state" == inactive || "$state" == failed ) ]]; then
+          echo '→ 已有 Docker 未启动，尝试启动 docker.service（不重装、不重启）' >&2
+          if systemctl start --no-block docker.service; then
+            for ((i=0;i<30;i++)); do if kivo_probe_docker; then break; fi; sleep 2; done
+          fi
+        fi
+      fi
+      kivo_probe_docker || kivo_docker_diagnose
+    fi
+  fi
+  [[ "$(printf '%s\n%s\n' 20.10.10 "$DOCKER_SERVER_VERSION" | sort -V | head -n1)" == 20.10.10 ]] || kivo_error '已有 Docker 版本过旧，需要 20.10.10+；请维护原 Docker 后重试。'
+  printf '→ 连接已有 Docker：主机 %s，服务端 %s，socket %s\n' "$(hostname)" "$DOCKER_SERVER_VERSION" "$DOCKER_SOCKET" >&2
+}
+kivo_save_runtime() {
+  printf 'DOCKER_BIN=%s\nDOCKER_SOCKET=%s\nDOCKER_NETWORK=%s\n' "$DOCKER_BIN" "$DOCKER_SOCKET" "$DOCKER_NETWORK" > "$ROOT/runtime.env.new"
+  chmod 600 "$ROOT/runtime.env.new"
+  mv "$ROOT/runtime.env.new" "$ROOT/runtime.env"
 }
 kivo_container_config() {
   CONTAINER="$(kivo_get "$ROOT/deployment.env" KIVO_CONTAINER)"; CONTAINER="${CONTAINER:-kivo}"

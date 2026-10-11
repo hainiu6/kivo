@@ -32,8 +32,13 @@ run_debian() {
     -e KIVO_VERSION="${TEST_VERSION:-v0.0.1}" \
     -e KIVO_INSTALL_DIR="${TEST_ROOT:-$ROOT}" \
     -e KIVO_CONTAINER="${TEST_CONTAINER:-kivo-ci}" \
+    -e KIVO_DOCKER_SOCKET="${TEST_SOCKET:-}" \
     kivo/debian10-test bash "$@"
 }
+# An unreachable local endpoint must fail with its actual error before downloading an image.
+if TEST_SOCKET=unix:///run/kivo-missing-test.sock TEST_ROOT="$WORK/preflight" run_debian "$WORK/www/scripts/install.sh" > "$WORK/preflight.log" 2>&1; then echo 'Bad endpoint accepted' >&2; exit 1; fi
+grep -q 'Docker 原始错误' "$WORK/preflight.log"
+if grep -q '预构建镜像' "$WORK/preflight.log"; then echo 'Image downloaded before Docker check' >&2; exit 1; fi
 run_debian "$WORK/www/scripts/install.sh"
 grep -qx 'HTTP_PORT=8088' "$ROOT/.env"
 curl --fail http://127.0.0.1:8088/healthz

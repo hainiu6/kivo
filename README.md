@@ -27,12 +27,16 @@ curl -fsSL https://raw.githubusercontent.com/panhui/Kivo/main/scripts/install.sh
 
 普通账号请使用 `sudo bash /tmp/kivo-install.sh`。安装包已包含镜像，服务器**无需 Git、npm、Node.js、MariaDB 或 Docker Compose**。安装器不调用 apt / dpkg；截图中的 MariaDB 软件包错误不会阻挡此安装。
 
-- 已有 Docker：使用本机 `/var/run/docker.sock`，要求 Docker 20.10.10+，不重装、不重启原 Docker。
+- 已有 Docker：先检查本机 socket 与服务端版本，要求 Docker 20.10.10+。服务未启动时尝试启动；运行中的服务不会被重启，也不重装 Docker。连接检查通过后才下载镜像。
 - 没有 Docker：下载并校验官方静态 Docker 29.8.2，放在 `/opt/kivo/runtime/`，使用独立 `kivo-docker.service`、socket 和存储目录。不会向 `/usr/bin` 安装 Docker，也不改 `/etc/docker`。
 - 默认只发布 **8088 → 容器 3000**，不占用 80 / 443。8088 被占用时自动尝试 8089–8107；显式指定端口被占用则退出。
 - 数据在 `/opt/kivo/data`，配置在 `/opt/kivo/.env`；初始账号 `admin`，随机密码在安装完成时显示并保存在 `.env`。登录后可修改密码。
 
 安装成功后访问显示的后台地址，并在服务器防火墙 / 云安全组放行实际端口。安装器不配置云安全组或额外放行规则；Docker 会创建容器所需的网络规则。已有同名容器会退出，不会覆盖它。
+
+安装器识别本机 Docker context / `DOCKER_HOST` 的 Unix socket，并兼容 `/run/docker.sock` 与 `/var/run/docker.sock`。执行已选定的本机连接时会排除继承的 context、TLS 和 API 版本覆盖。自定义本机 socket 可通过 `KIVO_DOCKER_SOCKET=unix:///自定义路径/docker.sock` 指定；远程 Docker 不支持宿主机数据挂载，会明确拒绝。
+
+如果连接检查失败，安装器会显示**当前主机名、客户端路径、连接 socket 和原始错误**，不会反复下载镜像后才报错。请在安装失败的同一台服务器执行 `systemctl status docker --no-pager -l`、`journalctl -u docker -n 30 --no-pager` 排查。连接检查使用服务端版本查询，不把 `docker info` 的其他错误误报为「服务未启动」。
 
 若服务器在 NAT 后，指定正确公网地址（替换示例 IP）：
 

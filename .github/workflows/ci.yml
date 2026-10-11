@@ -17,6 +17,7 @@ jobs:
       - run: npm test
       - run: npm audit --omit=dev
       - run: for file in scripts/*.sh; do bash -n "$file"; done
+      - run: bash test/runtime-detection.sh
       - name: Container smoke test
         run: |
           printf 'PUBLIC_URL=http://localhost:8088\nADMIN_USERNAME=admin\nADMIN_PASSWORD=ci-only-test-password\n' > .env

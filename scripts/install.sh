@@ -16,10 +16,16 @@ fi
 mkdir -p "$ROOT"
 exec 9>"$ROOT/.install.lock"
 flock -n 9 || kivo_error '另一个安装正在运行。'
+if [[ -f "$ROOT/deployment.env" ]]; then echo "已有 Docker 镜像版安装，请运行：bash $ROOT/scripts/upgrade.sh" >&2; exit 1; fi
+# Check an existing daemon before downloading the 113 MB image bundle.
+if [[ -f "$ROOT/runtime.env" ]]; then
+  kivo_docker_init
+elif kivo_use_existing_docker; then
+  kivo_save_runtime
+fi
 kivo_fetch_bundle "$WORK"
 if [[ ! -f "$ROOT/runtime.env" ]]; then ROOT="$ROOT" bash "$BUNDLE/scripts/install-runtime.sh"; fi
 kivo_docker_init
-if [[ -f "$ROOT/deployment.env" ]]; then echo "已有 Docker 镜像版安装，请运行：bash $ROOT/scripts/upgrade.sh" >&2; exit 1; fi
 CONTAINER="${KIVO_CONTAINER:-kivo}"
 [[ "$CONTAINER" =~ ^kivo[a-zA-Z0-9_.-]*$ ]] || kivo_error '容器名称必须以 kivo 开头，仅可包含字母、数字、点、下划线和连字符。'
 if kivo_docker inspect "$CONTAINER" >/dev/null 2>&1; then kivo_error "容器 $CONTAINER 已存在，不会覆盖；请指定其他 KIVO_CONTAINER，或先检查原容器。"; fi
