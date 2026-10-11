@@ -21,10 +21,10 @@ function harness({ muted = false, blocked = false } = {}) {
     Date: { now: () => now }, setTimeout: callback => { timers.set(++nextTimer, callback); return nextTimer; }, clearTimeout: id => timers.delete(id)
   });
   const notifications = window.KivoNotifications.create({ button, favicon, onCount: count => counts.push(count), getUnread: () => new Promise(resolve => requests.push(resolve)) });
-  return { notifications, button, document, favicon, events, counts, stored, requests, get context() { return context; }, get tones() { return tones; }, nextTone: () => { now += 1000; }, flush: async () => { const [id, callback] = timers.entries().next().value || []; if (callback) { timers.delete(id); callback(); } await Promise.resolve(); }, tick: async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); } };
+  return { notifications, button, document, favicon, events, counts, stored, requests, get context() { return context; }, get tones() { return tones; }, nextTone: () => { now += 1500; }, flush: async () => { const [id, callback] = timers.entries().next().value || []; if (callback) { timers.delete(id); callback(); } await Promise.resolve(); }, tick: async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); } };
 }
 
-test('new visitor messages play a two-tone alert once; replies, history, bursts and duplicates stay quiet', async () => {
+test('new visitor messages play the stronger four-note alert once; replies, history, bursts and duplicates stay quiet', async () => {
   const h = harness(); h.notifications.start(); await h.flush(); h.requests.shift()({ total: 7 }); await h.tick();
   assert.equal(h.tones, 0, 'loading unread history must not play sound');
   assert.match(h.document.title, /7 条未读/);
@@ -32,14 +32,14 @@ test('new visitor messages play a two-tone alert once; replies, history, bursts 
   h.events.pointerdown({ isTrusted: false, target: {} }); await h.tick(); assert.equal(h.context, undefined);
   h.events.pointerdown({ isTrusted: true, target: {} }); await h.tick();
   assert.equal(h.context.state, 'running');
-  h.notifications.receive({ id: 1, sender: 'visitor' }); assert.equal(h.tones, 2); assert.equal(h.counts.at(-1), 8);
-  h.nextTone(); h.notifications.receive({ id: 1, sender: 'visitor' }); assert.equal(h.tones, 2, 'duplicate delivery must not ring twice');
-  h.notifications.receive({ id: 2, sender: 'agent' }); h.notifications.receive({ id: 3, sender: 'auto' }); assert.equal(h.tones, 2);
-  h.notifications.receive({ id: 4, sender: 'visitor', kind: 'image' }); assert.equal(h.tones, 4);
-  h.notifications.receive({ id: 5, sender: 'visitor', kind: 'sticker' }); assert.equal(h.tones, 4, 'a burst uses one alert');
+  h.notifications.receive({ id: 1, sender: 'visitor' }); assert.equal(h.tones, 4); assert.equal(h.counts.at(-1), 8);
+  h.nextTone(); h.notifications.receive({ id: 1, sender: 'visitor' }); assert.equal(h.tones, 4, 'duplicate delivery must not ring twice');
+  h.notifications.receive({ id: 2, sender: 'agent' }); h.notifications.receive({ id: 3, sender: 'auto' }); assert.equal(h.tones, 4);
+  h.notifications.receive({ id: 4, sender: 'visitor', kind: 'image' }); assert.equal(h.tones, 8);
+  h.notifications.receive({ id: 5, sender: 'visitor', kind: 'sticker' }); assert.equal(h.tones, 8, 'a burst uses one alert');
   h.button.onclick(); assert.equal(h.stored.get('kivo.admin.sound'), 'off'); h.nextTone();
-  h.notifications.receive({ id: 6, sender: 'visitor' }); assert.equal(h.tones, 4); assert.equal(h.counts.at(-1), 11);
-  h.button.onclick(); await h.tick(); assert.equal(h.tones, 6, 'enabling sound previews the alert');
+  h.notifications.receive({ id: 6, sender: 'visitor' }); assert.equal(h.tones, 8); assert.equal(h.counts.at(-1), 11);
+  h.button.onclick(); await h.tick(); assert.equal(h.tones, 12, 'enabling sound previews the alert');
   assert.equal(h.stored.get('kivo.admin.sound'), 'on');
 });
 

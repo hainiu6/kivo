@@ -56,7 +56,7 @@ window.addEventListener('message',event=>{
   if(event.origin!==parentOrigin)return;
   if(event.data.type==='reset'){reset();return;}
   if(event.data.type==='page'){const page=event.data.page;try{if(typeof page==='string'&&new URL(page).origin===parentOrigin){currentPage=page;if(socket?.connected)socket.emit('visitor:page',{page});}}catch{/* Ignore invalid host page notifications. */}}
-  if(event.data.type==='visibility'){opened=!!event.data.opened;if(opened){$('messages').scrollTop=$('messages').scrollHeight;$('message-input').focus();}}
+  if(event.data.type==='visibility'){opened=!!event.data.opened;if(opened){$('messages').scrollTop=$('messages').scrollHeight;if(event.data.focus!==false)$('message-input').focus();}}
 });
 $('close').onclick=()=>tell('close');document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!e.defaultPrevented&&!document.querySelector('dialog[open]'))tell('close');});
 $('restart-conversation').onclick=()=>{$('restart-conversation').hidden=true;$('agent-status').textContent='正在连接…';error('');tell('restart-conversation');};

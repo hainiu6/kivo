@@ -4,6 +4,20 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source=readFileSync(new URL('../public/widget.js',import.meta.url),'utf8');
+test('new replies open the visitor panel without stealing focus, reject spoofed notifications and respect deletion',async()=>{
+  const nodes=[],listeners={},sent=[];let focused=0;
+  const element=tag=>{const node={tag,dataset:{},style:{setProperty(){}},append(){},setAttribute(){},focus(){focused++;},attachShadow(){return{append(){}};},contentWindow:{postMessage:data=>sent.push(data)}};nodes.push(node);return node;};
+  const context={URL,console,location:{href:'https://shop.example/account',origin:'https://shop.example'},window:{addEventListener:(name,handler)=>{listeners[name]=handler;}},document:{currentScript:{src:'https://chat.example/widget.js',getAttribute:key=>key==='data-site'?'site-id':null},body:{append(){}},createElement:element,addEventListener(){}},setInterval(){},localStorage:{getItem(){},setItem(){},removeItem(){}},fetch:async()=>({ok:true,json:async()=>({conversationId:'conversation-id',visitorToken:'token',identity:null,site:{id:'site-id',color:'#0f766e'}})})};
+  vm.runInNewContext(source,context);await new Promise(resolve=>setImmediate(resolve));
+  const frame=nodes.find(n=>n.tag==='iframe'),panel=nodes.find(n=>n.className==='panel'),launcher=nodes.find(n=>n.className==='launcher');
+  const notify=(type,origin='https://chat.example',source=frame.contentWindow)=>listeners.message({source,origin,data:{kivo:true,type}});
+  notify('unread','https://evil.example');notify('unread','https://chat.example',{});assert.equal(panel.hidden,true);
+  notify('unread');assert.equal(panel.hidden,false);assert.equal(launcher.dataset.open,'true');assert.equal(focused,0);assert.equal(sent.at(-1).focus,false);
+  const before=sent.length;notify('unread');assert.equal(sent.length,before,'already-open panel stays open');
+  notify('close');assert.equal(panel.hidden,true);focused=0;
+  launcher.onclick();assert.equal(focused,1,'manual open focuses the chat');
+  notify('close');notify('conversation-deleted');notify('unread');assert.equal(panel.hidden,true,'deleted conversations cannot reopen');
+});
 test('session-name embed makes no identity request and isolates browser credentials for names and logout',async()=>{
   const storage=new Map(),requests=[];
   let counter=0;

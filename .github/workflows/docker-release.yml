@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag (e.g. v1.5.1); must be new'
+        description: 'Release tag (e.g. v1.6.0); must be new'
         required: true
-        default: v1.5.1
+        default: v1.6.0
   push:
     tags: ['v*']
 permissions:
@@ -65,5 +65,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '新增后台访客新消息提示音，可启用试听或静音并记住偏好；浏览器第一次使用需要点击后启用声音。客服回复、自动回复、历史加载和重复投递不响铃，连续快速消息合并提示音。' '浏览器标签标题显示未读消息数量，标签图标显示红色提示点，左侧会话入口显示未读角标。统计所有网站、状态和最近 200 条列表外的记录，不受搜索及筛选影响；已读、删除和清空后同步更新。' '左侧菜单默认收起为图标栏，左上方按钮可展开、收起，并记住浏览器选择。窄屏选择菜单入口后自动收起。折叠时仍可切换页面、控制提示音和退出登录。' '升级保留聊天数据、头像、网站、PHP Session 用户名称和签名对接配置。升级后强制刷新后台，点击菜单下方提示音按钮启用声音。详见 docs/message-notifications.md。' '通过新消息提示、未读接口权限及跨网站超过 200 条统计、异步刷新竞争、静音与重复去重、原有聊天/图片/身份/删除测试，以及原生 amd64 / arm64 容器和 Debian 10 用户空间安装、升级及数据保留检查（CI 主机内核）。' > release-notes.md
+          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '后台提示音改为更响亮的四音提醒，保留启用、试听、静音和消息去重。浏览器首次使用需要点击或按键后启用声音。' '管理员登录保持 30 天，成功恢复工作台时续期；仍有效的旧登录自动续期，退出及修改密码仍撤销登录。刷新恢复当前模块、会话、筛选、搜索和文字草稿，暂时网络失败显示重试入口。' '后台圆角输入框包住图片、表情和发送按钮；访客收到新的客服回复时自动展开窗口，不抢走网站输入框焦点，历史加载和重复消息不触发展开。' '新增奶猫、水豚、机器人三套共 18 个动态表情，加上原有团团共 26 个，两端支持套装切换、预览和发送，跳跃、旋转、爱心和纸屑动画更明显。' '升级保留会话、图片、网站和 PHP 用户配置。执行 bash /opt/kivo/scripts/upgrade.sh 后强制刷新后台和接入网站，现有嵌入代码继续使用。详见 docs/workspace-update.md。' '通过 30 天会话及旧登录续期、刷新恢复与网络重试、自动展开和焦点保护、全部表情两端发送等 32 项测试；浏览器实测刷新与表情发送；通过原生 amd64 / arm64 容器及 Debian 10 用户空间安装、升级和数据保留检查（CI 主机内核）。' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md

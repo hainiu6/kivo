@@ -6,7 +6,7 @@ const source=readFileSync(new URL('../public/chat-ui.js',import.meta.url),'utf8'
 const id='12345678-abcd-abcd-abcd-123456789abc';
 const file=(name='中文截图📸.PNG',type='')=>new File([new Uint8Array([1,2,3])],name,{type});
 function setup(fetch){
-  const classes=()=>({values:new Set(),add(value){this.values.add(value);},remove(value){this.values.delete(value);}});
+  const classes=()=>({values:new Set(),add(value){this.values.add(value);},remove(value){this.values.delete(value);},toggle(value,enabled){enabled?this.add(value):this.remove(value);}});
   function element(tag){return {tag,children:[],listeners:{},classList:classes(),append(...nodes){this.children.push(...nodes);},replaceChildren(...nodes){this.children=nodes;},setAttribute(){},addEventListener(name,handler){this.listeners[name]=handler;},contains(){return false;},focus(){},files:[]};}
   const document={createElement:element,body:element('body'),addEventListener(){}};
   const window={};vm.runInNewContext(source,{window,document,Blob,File,FormData,fetch,URL:{createObjectURL:()=> 'blob:test',revokeObjectURL(){}},KivoStickers:{items:[]}});

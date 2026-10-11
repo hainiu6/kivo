@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 test('widget removes deleted history and images, rejects late replies, and waits for visitor action after conversation deletion',()=>{
-  const nodes=new Map(),listeners={},parentMessages=[],socketListeners={};let acknowledge,closed=0,cleared=0,forgotten=[];
-  const node=()=>({children:[],textContent:'',value:'',hidden:false,disabled:false,scrollHeight:100,scrollTop:0,clientHeight:100,classList:{add(){}},append(...children){this.children.push(...children);},replaceChildren(...children){this.children=children;},focus(){},requestSubmit(){}});
+  const nodes=new Map(),listeners={},parentMessages=[],socketListeners={};let acknowledge,closed=0,cleared=0,forgotten=[],focused=0;
+  const node=()=>({children:[],textContent:'',value:'',hidden:false,disabled:false,scrollHeight:100,scrollTop:0,clientHeight:100,classList:{add(){}},append(...children){this.children.push(...children);},replaceChildren(...children){this.children=children;},focus(){focused++;},requestSubmit(){}});
   const get=id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);};
   const socket={connected:true,auth:{},on(name,handler){socketListeners[name]=handler;},removeAllListeners(){for(const key of Object.keys(socketListeners))delete socketListeners[key];},disconnect(){this.connected=false;closed++;},emit(){},timeout(){return{emit(name,data,callback){acknowledge=callback;}};}};
   const parent={postMessage:data=>parentMessages.push(data)};
@@ -13,6 +13,12 @@ test('widget removes deleted history and images, rejects late replies, and waits
   listeners.message({source:parent,origin:'https://shop.example',data:{kivo:true,type:'init',site:{id:'site-1',color:'#0f766e',greeting:'hello'},parentOrigin:'https://shop.example',page:'https://shop.example/account',visitorToken:'token',conversationId:'conversation-1'}});
   const one={id:1,sender:'visitor',created_at:1,body:'delete me'},two={id:2,sender:'agent',created_at:2,body:'keep me'};
   socketListeners.history([one,two]);assert.equal(get('message-items').children.length,2);
+  assert.equal(parentMessages.filter(m=>m.type==='unread').length,0,'loading old agent messages does not reopen the chat');
+  socketListeners['message:new'](two);assert.equal(parentMessages.filter(m=>m.type==='unread').length,0,'duplicate messages do not notify');
+  socketListeners['message:new']({id:3,sender:'agent',created_at:3,body:'new reply'});assert.equal(parentMessages.at(-1).type,'unread');
+  listeners.message({source:parent,origin:'https://shop.example',data:{kivo:true,type:'visibility',opened:true,focus:false}});assert.equal(focused,0);
+  listeners.message({source:parent,origin:'https://shop.example',data:{kivo:true,type:'visibility',opened:true,focus:true}});assert.equal(focused,1);
+  socketListeners['message:deleted']({conversationId:'conversation-1',messageId:3,mediaIds:[]});
   socketListeners['message:deleted']({conversationId:'other',messageId:2,mediaIds:[]});assert.equal(get('message-items').children.length,2);
   socketListeners['message:deleted']({conversationId:'conversation-1',messageId:1,mediaIds:['image-1']});assert.equal(get('message-items').children.length,1);assert.deepEqual(forgotten,['image-1']);
   socketListeners.history([one,two]);assert.equal(get('message-items').children.length,1,'stale history cannot restore a deleted message');

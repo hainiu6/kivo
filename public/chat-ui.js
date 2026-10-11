@@ -76,8 +76,14 @@
     picker.append(el('p','emoji-picker-title','表情'));
     const grid=el('div','emoji-grid');
     for(const value of ['😊','😄','😉','🥰','😎','🤔','🥺','😭','👍','🙏','❤️','🎉','✨','☕','✅','👋']) {const b=el('button','',value);b.type='button';b.setAttribute('aria-label',`插入 ${value}`);b.onclick=()=>{const start=input.selectionStart,end=input.selectionEnd;input.setRangeText(value,start,end,'end');input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();toggle(false);};grid.append(b);}
-    picker.append(grid,el('p','emoji-picker-title','团团 · 动态表情'));
-    const stickers=el('div','sticker-grid');for(const s of KivoStickers.items){const b=el('button');b.type='button';b.setAttribute('aria-label',s.label);b.append(KivoStickers.render(s.id),el('small','',s.label.split(' · ')[1]));b.onclick=()=>{if(!getContext()){onError('请先选择会话并等待连接');return;}if(uploading){onError('图片正在上传，请稍候');return;}clear();attachment={kind:'sticker',stickerId:s.id};renderPreview();toggle(false);input.focus();};stickers.append(b);}picker.append(stickers);tools.append(photo,emoji,file,picker);
+    picker.append(grid,el('p','emoji-picker-title','动态表情 · 选择一套'));
+    const packs=KivoStickers.packs||['团团'],tabs=el('div','sticker-pack-tabs');tabs.setAttribute('role','group');tabs.setAttribute('aria-label','动态表情套装');
+    const stickers=el('div','sticker-grid'),packButtons=[];
+    function selectPack(pack){
+      packButtons.forEach(b=>{const selected=b.textContent===pack;b.classList.toggle('active',selected);b.setAttribute('aria-pressed',String(selected));});stickers.replaceChildren();
+      for(const s of KivoStickers.items.filter(s=>(s.pack||'团团')===pack)){const b=el('button');b.type='button';b.setAttribute('aria-label',s.label);b.append(KivoStickers.render(s.id),el('small','',s.label.split(' · ')[1]));b.onclick=()=>{if(!getContext()){onError('请先选择会话并等待连接');return;}if(uploading){onError('图片正在上传，请稍候');return;}clear();attachment={kind:'sticker',stickerId:s.id};renderPreview();toggle(false);input.focus();};stickers.append(b);}
+    }
+    packs.forEach(pack=>{const b=el('button','',pack);b.type='button';b.onclick=()=>selectPack(pack);packButtons.push(b);tabs.append(b);});selectPack(packs[0]);picker.append(tabs,stickers);tools.append(photo,emoji,file,picker);
     function renderPreview() {
       preview.replaceChildren();preview.hidden=!attachment&&!uploading;if(preview.hidden)return;
       if(attachment?.kind==='image'){const img=el('img');img.src=attachment.url;img.alt='待发送图片';preview.append(img);}

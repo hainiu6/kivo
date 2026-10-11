@@ -61,11 +61,11 @@
     } finally { if (revision === bootstrapRevision) booting = false; }
   }
   window.Kivo = {...window.Kivo,refreshIdentity:()=>{deletedConversation=false;return bootstrap(true);}};
-  function setOpen(value) {
+  function setOpen(value, focus = true) {
     opened = value;panel.hidden = !value;badge.hidden = true;error.hidden = true;
     launcher.dataset.open=String(value);launcher.setAttribute('aria-expanded', String(value));launcher.setAttribute('aria-label', value ? '关闭在线客服' : '打开在线客服');
-    tell('visibility', { opened });if (value && !session) {deletedConversation=false;bootstrap();}
-    if (value) frame.focus();
+    tell('visibility', { opened, focus });if (value && !session) {deletedConversation=false;bootstrap();}
+    if (value && focus) frame.focus();
   }
   launcher.onclick = () => setOpen(!opened);
   window.addEventListener('message', event => {
@@ -75,7 +75,7 @@
     if (event.data.type === 'restart-conversation') {deletedConversation=false;bootstrap();}
     if (event.data.type === 'ready') { ready = true;initialize(); }
     if (event.data.type === 'close') { setOpen(false);launcher.focus(); }
-    if (event.data.type === 'unread' && !opened) badge.hidden = false;
+    if (event.data.type === 'unread' && !opened && session && !deletedConversation) setOpen(true, false);
   });
   window.addEventListener('keydown', e => { if (e.key === 'Escape' && opened) setOpen(false); });
   const mount = () => { document.body.append(host);bootstrap(); };

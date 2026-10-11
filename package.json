@@ -1,6 +1,6 @@
 {
   "name": "kivo",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -10,7 +10,7 @@
     "start": "node --env-file-if-exists=.env server/index.js",
     "dev": "node --watch --env-file-if-exists=.env server/index.js",
     "test": "node --test test/*.test.js",
-    "check": "node --check server/index.js && node --check server/app.js && node --check server/identity.js && node --check server/media.js && node --check server/device.js && node --check server/ip.js && node --check server/history.js && node --check public/chat-ui.js && node --check public/stickers.js && node --check public/admin-notifications.js && node --check public/admin.js && node --check public/widget.js && node --check public/widget-frame.js && node --check public/message-id.js"
+    "check": "node --check server/index.js && node --check server/app.js && node --check server/identity.js && node --check server/media.js && node --check server/device.js && node --check server/ip.js && node --check server/history.js && node --check public/chat-ui.js && node --check public/stickers.js && node --check public/admin-notifications.js && node --check public/admin-state.js && node --check public/admin.js && node --check public/widget.js && node --check public/widget-frame.js && node --check public/message-id.js"
   },
   "dependencies": {
     "bcryptjs": "3.0.3",

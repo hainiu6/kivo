@@ -19,11 +19,15 @@ import { visitorIP } from './ip.js';
 const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
 const hash = value => createHash('sha256').update(value).digest('hex');
 const token = () => randomBytes(32).toString('hex');
+const SESSION_MAX_AGE = 30 * 86400000;
 const now = () => Date.now();
 const text = (value, max = 200) => typeof value === 'string' ? value.trim().slice(0, max) : '';
 const uuid = value => typeof value === 'string' && /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(value);
 const validToken = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
-const stickerIds = new Set(['hello', 'love', 'yay', 'laugh', 'cry', 'wait', 'coffee', 'thanks']);
+const stickerIds = new Set(['hello', 'love', 'yay', 'laugh', 'cry', 'wait', 'coffee', 'thanks',
+  'cat-dance','cat-wow','cat-love','cat-cheer','cat-sleep','cat-zoom',
+  'capy-chill','capy-bath','capy-snack','capy-yay','capy-thanks','capy-spin',
+  'bot-hi','bot-loading','bot-ok','bot-party','bot-power','bot-hug']);
 function originOf(value) { try { const u = new URL(value); return ['http:', 'https:'].includes(u.protocol) ? u.origin : ''; } catch { return ''; } }
 function safePage(value) { try { const u = new URL(value); if (!originOf(value)) return ''; u.username = ''; u.password = ''; return u.href.slice(0, 2048); } catch { return ''; } }
 function cookieToken(req) { const match = /(?:^|;\s*)kivo_session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie || ''); return match?.[1]; }
@@ -212,8 +216,8 @@ export function createKivo(options = {}) {
     if (!user || !valid) return res.status(401).json({ error: '账号或密码错误' });
     const raw = token();
     db.prepare('DELETE FROM sessions WHERE expires<=?').run(now());
-    db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(hash(raw), user.id, now() + 7 * 86400000);
-    res.cookie('kivo_session', raw, { httpOnly: true, sameSite: 'lax', secure: publicOrigin.startsWith('https:'), path: '/', maxAge: 7 * 86400000 });
+    db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(hash(raw), user.id, now() + SESSION_MAX_AGE);
+    res.cookie('kivo_session', raw, { httpOnly: true, sameSite: 'lax', secure: publicOrigin.startsWith('https:'), path: '/', maxAge: SESSION_MAX_AGE });
     res.json({ username: user.username });
   });
   app.use('/api/admin', adminOnly);
@@ -223,7 +227,13 @@ export function createKivo(options = {}) {
     if (!uuid(req.params.id) || !conversation(req.params.id)) return res.status(404).json({ error: '会话不存在' });
     req.uploadConversation = req.params.id; next();
   }, imageLimiter, imageBody, upload('chat'));
-  app.get('/api/admin/me', (req, res) => res.json({ username: req.user.username, publicUrl }));
+  app.get('/api/admin/me', (req, res) => {
+    const raw = cookieToken(req);
+    // Only already-valid sessions reach this handler. Upgrade existing logins too.
+    db.prepare('UPDATE sessions SET expires=? WHERE token=?').run(now() + SESSION_MAX_AGE, hash(raw));
+    res.cookie('kivo_session', raw, { httpOnly: true, sameSite: 'lax', secure: publicOrigin.startsWith('https:'), path: '/', maxAge: SESSION_MAX_AGE });
+    res.json({ username: req.user.username, publicUrl });
+  });
   app.post('/api/admin/logout', (req, res) => {
     const raw = cookieToken(req);
     db.prepare('DELETE FROM sessions WHERE token=?').run(hash(raw));
@@ -310,6 +320,10 @@ export function createKivo(options = {}) {
     res.json(rows.map(r => conversation(r.id)));
   });
   registerHistoryRoutes(app, { db, dataDir, io, conversation, updateConversation });
+  app.get('/api/admin/conversations/:id', (req, res) => {
+    const c = conversation(req.params.id);
+    c ? res.json(c) : res.status(404).json({ error: '会话不存在' });
+  });
   app.get('/api/admin/conversations/:id/messages', (req, res) => {
     if (!conversation(req.params.id)) return res.status(404).json({ error: '会话不存在' });
     res.json(messages(req.params.id, req.query.before));
