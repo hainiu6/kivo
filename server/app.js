@@ -299,6 +299,9 @@ export function createKivo(options = {}) {
     try { const s = siteInput(req.body), profile = siteProfile(req.params.id); if (req.body.autoReply === undefined) s.autoReply = replyConfig(req.params.id); if (req.body.supportName === undefined) s.supportName = profile.supportName; if (req.body.avatarId === undefined) s.avatarId = profile.avatarId; saveSite(req.params.id, s, false); res.json({ ok: true }); }
     catch (e) { res.status(400).json({ error: e.message }); }
   });
+  app.get('/api/admin/unread', (req, res) => {
+    res.json({ total: db.prepare('SELECT COALESCE(SUM(unread),0) AS total FROM conversations').get().total });
+  });
   app.get('/api/admin/conversations', (req, res) => {
     const q = `%${text(req.query.q, 100)}%`;
     const status = ['open', 'closed'].includes(req.query.status) ? req.query.status : '';

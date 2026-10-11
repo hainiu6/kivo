@@ -6,6 +6,7 @@ import path from 'node:path';
 import { io } from 'socket.io-client';
 import { DatabaseSync, backup } from 'node:sqlite';
 import { createKivo } from '../server/app.js';
+import { randomUUID } from 'node:crypto';
 
 const origin = 'http://127.0.0.1:31999';
 const visitorOrigin = 'https://shop.example.com';
@@ -33,11 +34,13 @@ test('real HTTP + WebSocket workflow, authorization, persistence and backup', as
   }
   assert.equal((await request('/healthz')).data.status,'ok');
   assert.equal((await request('/api/admin/sites')).res.status,401);
+  assert.equal((await request('/api/admin/unread')).res.status,401);
   assert.equal((await request('/api/login',{method:'POST',body:{username:'admin',password},requestOrigin:'https://evil.example'})).res.status,403);
   assert.equal((await request('/api/login',{method:'POST',body:{username:'admin',password:'wrong'}})).res.status,401);
   const login=await request('/api/login',{method:'POST',body:{username:'admin',password}});
   assert.equal(login.res.status,200);const cookie=login.res.headers.get('set-cookie').split(';')[0];
   assert.match(login.res.headers.get('set-cookie'),/HttpOnly/);
+  assert.equal((await request('/api/admin/unread',{cookie})).data.total,0);
   const polling=io(base,{auth:{role:'admin'},autoConnect:false,reconnection:false,transports:['polling'],extraHeaders:{Referer:origin+'/',Cookie:cookie}});
   sockets.push(polling);const pollingReady=waitEvent(polling,'connect');polling.connect();await pollingReady;polling.disconnect();
   const site=await request('/api/admin/sites',{method:'POST',cookie,body:{name:'演示商城',origins:[visitorOrigin],color:'#0f766e',greeting:'你好！'}});
@@ -66,9 +69,11 @@ test('real HTTP + WebSocket workflow, authorization, persistence and backup', as
   assert.equal((await send(visitor,{body:'x'.repeat(4001),clientId:crypto.randomUUID()})).ok,false);
   await request(`/api/admin/conversations/${id}/read`,{method:'POST',cookie,body:{lastId:sent.message.id}});
   assert.equal((await request('/api/admin/conversations',{cookie})).data[0].unread,0);
+  assert.equal((await request('/api/admin/unread',{cookie})).data.total,0);
   await send(visitor,{body:'谢谢',clientId:crypto.randomUUID()});
   await request(`/api/admin/conversations/${id}/read`,{method:'POST',cookie,body:{lastId:sent.message.id}});
   assert.equal((await request('/api/admin/conversations',{cookie})).data[0].unread,1,'read does not clear an unseen message');
+  assert.equal((await request('/api/admin/unread?status=closed&q=no-match&site=missing',{cookie})).data.total,1,'unread count is independent of every list filter');
   await request(`/api/admin/conversations/${id}/status`,{method:'POST',cookie,body:{status:'closed'}});
   assert.equal((await request('/api/admin/conversations?status=closed',{cookie})).data.length,1);
   await send(visitor,{body:'再问一个问题',clientId:crypto.randomUUID()});
@@ -93,4 +98,21 @@ test('real HTTP + WebSocket workflow, authorization, persistence and backup', as
 test('startup refuses an insecure initial password',()=>{
   const dir=mkdtempSync(path.join(os.tmpdir(),'kivo-init-'));
   try{assert.throws(()=>createKivo({dataDir:dir,adminPassword:'short'}),/ADMIN_PASSWORD/);}finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('global unread count includes conversations outside the latest 200 rows and every site/status', async t => {
+  const dir=mkdtempSync(path.join(os.tmpdir(),'kivo-unread-'));
+  const service=createKivo({dataDir:dir,publicUrl:origin,adminPassword:password});
+  t.after(async()=>{await service.close();rmSync(dir,{recursive:true,force:true});});
+  await new Promise(resolve=>service.server.listen(0,'127.0.0.1',resolve));
+  const base=`http://127.0.0.1:${service.server.address().port}`;
+  const login=await fetch(base+'/api/login',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({username:'admin',password})});
+  const cookie=login.headers.get('set-cookie').split(';')[0];
+  const createSite=async name=>(await (await fetch(base+'/api/admin/sites',{method:'POST',headers:{Origin:origin,Cookie:cookie,'Content-Type':'application/json'},body:JSON.stringify({name,origins:['*']})})).json()).id;
+  const one=await createSite('one'),two=await createSite('two');
+  const insert=service.db.prepare('INSERT INTO conversations(id,site_id,visitor_hash,name,ip,region,page,status,unread,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
+  for(let i=0;i<205;i++)insert.run(randomUUID(),i%2?one:two,randomUUID(),'visitor','1.1.1.1','test',origin,i%2?'closed':'open',1,1,i+1);
+  const headers={Cookie:cookie};
+  assert.equal((await (await fetch(base+'/api/admin/conversations',{headers})).json()).length,200);
+  assert.equal((await (await fetch(base+`/api/admin/unread?site=${one}&status=open&q=nothing`,{headers})).json()).total,205);
 });

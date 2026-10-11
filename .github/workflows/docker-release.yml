@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag (e.g. v1.5.0); must be new'
+        description: 'Release tag (e.g. v1.5.1); must be new'
         required: true
-        default: v1.5.0
+        default: v1.5.1
   push:
     tags: ['v*']
 permissions:
@@ -65,5 +65,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '新增单条消息删除、当前会话清空、整段会话删除，以及全部 / 7 天前 / 一个月前（30 天）批量删除。批量操作可限定网站，按最近消息时间筛选，预览数量后确认；覆盖列表外的记录，保护预览后新建或重新活跃的会话。' '删除实时同步到访客与其他客服，相关图片一并清理；完整会话删除后访客可开始新对话。加载响应和延迟发送确认不会恢复已删除消息。保留网站配置、客服头像及其他会话的记录。' '访问域名移到右侧顶部，大号黑色显示。真实 IP 支持可信代理的 X-Forwarded-For / X-Real-IP，首次访问及重连时更新；宝塔部署需要 TRUST_PROXY=1、BIND_HOST=127.0.0.1 和正确转发头，详见 docs/history-management.md。' '升级保留现有数据、Session 用户名称及 PHP 签名对接配置。升级后强制刷新后台和网站。两个架构均通过删除权限、实时同步、图片清理、保留范围、并发响应、可信 IP 与原有聊天测试，以及实际容器删除和 Debian 10 用户空间安装、升级、端口冲突、数据保留及失败回退测试（CI 主机内核）。' > release-notes.md
+          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '新增后台访客新消息提示音，可启用试听或静音并记住偏好；浏览器第一次使用需要点击后启用声音。客服回复、自动回复、历史加载和重复投递不响铃，连续快速消息合并提示音。' '浏览器标签标题显示未读消息数量，标签图标显示红色提示点，左侧会话入口显示未读角标。统计所有网站、状态和最近 200 条列表外的记录，不受搜索及筛选影响；已读、删除和清空后同步更新。' '左侧菜单默认收起为图标栏，左上方按钮可展开、收起，并记住浏览器选择。窄屏选择菜单入口后自动收起。折叠时仍可切换页面、控制提示音和退出登录。' '升级保留聊天数据、头像、网站、PHP Session 用户名称和签名对接配置。升级后强制刷新后台，点击菜单下方提示音按钮启用声音。详见 docs/message-notifications.md。' '通过新消息提示、未读接口权限及跨网站超过 200 条统计、异步刷新竞争、静音与重复去重、原有聊天/图片/身份/删除测试，以及原生 amd64 / arm64 容器和 Debian 10 用户空间安装、升级及数据保留检查（CI 主机内核）。' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md
