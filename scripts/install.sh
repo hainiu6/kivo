@@ -10,9 +10,26 @@ if [[ "$ID" != debian || ! "$VERSION_ID" =~ ^(12|13)$ ]]; then echo '支持 Debi
 if [[ -e "$INSTALL_DIR" && -n "$(ls -A "$INSTALL_DIR")" ]]; then
   echo "安装目录已存在，请运行：sudo bash $INSTALL_DIR/scripts/upgrade.sh" >&2; exit 1
 fi
+apt_install() {
+  if apt-get install -y "$@"; then return 0; fi
+  echo '系统软件包安装失败，Kivo 安装尚未完成。请先修复上面的 apt / dpkg 错误，再重新运行安装脚本。' >&2
+  if [[ ! -e /etc/mysql/mariadb.cnf ]] && dpkg-query -W -f='${Status}' mariadb-common 2>/dev/null | grep -Eq '^(install|hold) ok (installed|unpacked|half-configured)$'; then
+    cat >&2 <<'EOF'
+检测到已有 MariaDB 软件包缺少 /etc/mysql/mariadb.cnf。Kivo 使用 SQLite，不依赖 MariaDB。
+可在 root 终端恢复 mariadb-common 软件包中的缺失配置，再完成待配置软件包：
+  apt-get --no-remove -o Dpkg::Options::="--force-confmiss" install --reinstall mariadb-common
+  dpkg --configure -a
+  apt-get --no-remove -f install
+这些命令不卸载 MariaDB；安装脚本不会自动修改已有数据库配置。
+EOF
+  else
+    echo '可先运行 dpkg --audit 查看尚未完成配置的软件包。' >&2
+  fi
+  exit 1
+}
 echo '→ 安装系统依赖'
 apt-get update
-apt-get install -y ca-certificates curl git openssl
+apt_install ca-certificates curl git openssl
 if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
   echo '→ 从 Docker 官方 Debian 软件源安装 Docker 和 Compose'
   if dpkg-query -W -f='${Status}' docker.io 2>/dev/null | grep -q 'install ok installed'; then
@@ -30,7 +47,7 @@ Architectures: $(dpkg --print-architecture)
 Signed-By: /etc/apt/keyrings/docker.asc
 EOF
   apt-get update
-  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 fi
 systemctl enable --now docker
 echo '→ 获取 Kivo'

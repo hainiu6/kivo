@@ -131,6 +131,24 @@ sudo docker compose down           # 停止服务，保留聊天数据与证书
 
 不记录消息内容或访客凭证到应用日志。勿将 `.env`、`data/`、`backups/` 提交到 Git；项目已忽略这些文件。
 
+## 安装时系统软件包报错
+
+如果安装依赖时出现 `update-alternatives: error: alternative path /etc/mysql/mariadb.cnf doesn't exist`，随后 `mariadb-common`、`libmariadb3`、`mariadb-client` 等配置失败，这是已有 MariaDB 软件包的配置文件缺失，导致 apt 无法完成操作。Kivo 使用 SQLite，没有安装或使用 MariaDB。
+
+`/etc/mysql/mariadb.cnf` 由 Debian 的 `mariadb-common` 软件包提供。可以通过重新安装该包，并使用 `--force-confmiss` 恢复缺失的包配置文件；现有配置文件不会被此选项强制替换。先在 root 终端逐条执行，上一条成功后再执行下一条：
+
+```bash
+apt-get --no-remove -o Dpkg::Options::="--force-confmiss" install --reinstall mariadb-common
+dpkg --configure -a
+apt-get --no-remove -f install
+```
+
+`--no-remove` 会在修复需要移除软件包时退出。这里不需要卸载 / 清除 MariaDB，也不要通过创建空 `mariadb.cnf` 绕过错误。命令恢复的是软件包提供的默认缺失配置；如果之前有自定义配置备份，可以先按你的服务器配置恢复。
+
+成功后重新下载并运行安装脚本。这类错误发生在克隆 Kivo 前，通常还没有创建 `/opt/kivo`。
+
+依据：[Debian mariadb-common 文件列表](https://packages.debian.org/bookworm/all/mariadb-common/filelist)、[dpkg 配置文件恢复选项](https://manpages.debian.org/bookworm/dpkg/dpkg.1.en.html)。
+
 ## 本地开发
 
 需要 Node.js 24+；应用使用 Node 内置 `node:sqlite`（Node 24 中仍标为实验性 API），无需单独部署数据库。
