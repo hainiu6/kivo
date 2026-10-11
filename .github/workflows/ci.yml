@@ -1,0 +1,30 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm audit --omit=dev
+      - run: bash -n scripts/install.sh scripts/upgrade.sh scripts/backup.sh
+      - name: Container smoke test
+        run: |
+          printf 'PUBLIC_URL=http://localhost:8080\nADMIN_USERNAME=admin\nADMIN_PASSWORD=ci-only-test-password\n' > .env
+          mkdir -p data
+          sudo chown 1000:1000 data
+          docker compose up -d --build --wait --wait-timeout 180
+          curl --fail --retry 8 --retry-connrefused --retry-delay 2 http://localhost:8080/healthz
+          sudo git config --global --add safe.directory "$PWD"
+          sudo bash scripts/backup.sh
+      - if: always()
+        run: docker compose logs --tail 80

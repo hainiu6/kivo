@@ -1,0 +1,25 @@
+{
+  "name": "kivo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "dev": "node --watch --env-file-if-exists=.env server/index.js",
+    "test": "node --test test/*.test.js",
+    "check": "node --check server/index.js && node --check server/app.js && node --check public/admin.js && node --check public/widget.js && node --check public/widget-frame.js"
+  },
+  "dependencies": {
+    "bcryptjs": "3.0.3",
+    "express": "5.3.0",
+    "express-rate-limit": "8.7.1",
+    "geoip-lite": "2.0.3",
+    "socket.io": "4.8.4"
+  },
+  "devDependencies": {
+    "socket.io-client": "4.8.4"
+  }
+}
