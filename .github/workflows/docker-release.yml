@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag (e.g. v1.3.1); must be new'
+        description: 'Release tag (e.g. v1.3.2); must be new'
         required: true
-        default: v1.3.1
+        default: v1.3.2
   push:
     tags: ['v*']
 permissions:
@@ -64,5 +64,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。\n\n新增：圆角客服窗口、可自定义客服名称和头像、图标呼吸和悬停动画、紧凑会话卡片、访客系统与浏览器、双方图片上传和粘贴、普通表情及 8 款原创团团动态表情。去掉组件底部版权。图片和聊天数据在升级及备份后保留。\n\n服务器无需 apt、Git、npm 或 Compose。安装与升级命令见仓库 README。升级前自动备份，健康检查失败恢复旧容器。两个架构均通过 Debian 10 用户空间的安装、升级、数据保留、端口冲突与失败回退测试（CI 主机内核）。\n' > release-notes.md
+          printf 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。\n\n图片上传改为标准 multipart 表单，先读取本地文件再上传，兼容旧版原始上传接口。代理错误页及文件读取失败显示明确中文提示，避免直接显示英文解析错误。双方支持选择、粘贴及拖入本地图片，预览后发送。客服窗口加大到最大 460 × 760，双方聊天正文和输入文字放大为 16px。升级后请强制刷新后台及接入网站。\n\n服务器无需 apt、Git、npm 或 Compose。安装与升级命令见仓库 README。升级前自动备份，健康检查失败恢复旧容器。两个架构均通过实际容器内头像和双向图片上传、Debian 10 用户空间的安装、升级、图片和数据保留、端口冲突与失败回退测试（CI 主机内核）。\n' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md

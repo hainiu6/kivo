@@ -11,6 +11,7 @@ import bcrypt from 'bcryptjs';
 import geoip from 'geoip-lite';
 import { deviceInfo } from './device.js';
 import { MAX_IMAGE_BYTES, storeImage } from './media.js';
+import multer from 'multer';
 
 const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -179,7 +180,18 @@ export function createKivo(options = {}) {
     res.set({ 'Content-Type': 'image/webp', 'Cache-Control': 'public, max-age=86400' }); res.sendFile(path.resolve(dataDir, 'media', `${media.id}.webp`));
   });
   const imageLimiter = rateLimit({ windowMs: 60000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: '图片上传过于频繁，请稍后再试' } });
-  const imageBody = express.raw({ type: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'], limit: MAX_IMAGE_BYTES });
+  const rawImageBody = express.raw({ type: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'], limit: MAX_IMAGE_BYTES });
+  const multipartImage = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_IMAGE_BYTES, files: 1, fields: 0, parts: 2, fieldNameSize: 32 } }).single('image');
+  // Keep raw uploads for older components while using browser-native multipart
+  // for new clients. Authentication and rate limits run before buffering files.
+  const imageBody = (req, res, next) => {
+    if (!req.is('multipart/form-data')) return rawImageBody(req, res, next);
+    multipartImage(req, res, error => {
+      if (error) return res.status(error.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: error.code === 'LIMIT_FILE_SIZE' ? '图片大小须小于 5 MB' : '每次只能上传一张图片，请重新选择' });
+      req.body = req.file?.buffer;
+      next();
+    });
+  };
   const upload = kind => async (req, res) => {
     try { const media = await storeImage(db, dataDir, req.body, { kind, conversationId: req.uploadConversation || null }); res.status(201).json({ ...media, ...(kind === 'avatar' ? { avatarUrl: `/avatars/${media.id}` } : {}) }); }
     catch (e) { res.status(400).json({ error: e.message }); }

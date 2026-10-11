@@ -4,7 +4,7 @@ let socket, parentOrigin, currentPage, initialized = false, opened = false, rows
 let visitorToken, supportName='在线客服', avatarUrl='/support-avatar.svg';
 const siteId = new URLSearchParams(location.search).get('site');
 const authHeaders = () => ({Authorization:`Bearer ${visitorToken}`,'X-Kivo-Site':siteId});
-const composer = KivoChat.composer({form:$('message-form'),input:$('message-input'),tools:$('chat-tools'),preview:$('attachment-preview'),getContext:()=>socket?.connected&&!sending?siteId:'',uploadUrl:()=>'/api/widget/images',headers:authHeaders,onError:error,onSubmitLock:locked=>$('send').disabled=locked||sending||!socket?.connected});
+const composer = KivoChat.composer({form:$('message-form'),input:$('message-input'),tools:$('chat-tools'),preview:$('attachment-preview'),dropTarget:document.body,getContext:()=>socket?.connected&&!sending?siteId:'',uploadUrl:()=>'/api/widget/images',headers:authHeaders,onError:error,onSubmitLock:locked=>$('send').disabled=locked||sending||!socket?.connected});
 function tell(type) { parent.postMessage({ kivo:true,type }, parentOrigin || '*'); }
 function error(message) { $('error').textContent=message; $('error').hidden=!message; }
 function render() {

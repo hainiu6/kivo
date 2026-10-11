@@ -25,11 +25,12 @@ test('images, avatars and stickers enforce ownership and survive legacy migratio
   let base=`http://127.0.0.1:${service.server.address().port}`;
   const sockets=[];
   t.after(async()=>{sockets.forEach(s=>s.disconnect());await service.close();rmSync(dir,{recursive:true,force:true});});
-  const request=(route,{body,headers={},method=body?'POST':'GET',requestOrigin=origin}={})=>fetch(base+route,{method,headers:{Origin:requestOrigin,...(body&&!Buffer.isBuffer(body)?{'Content-Type':'application/json'}:{}),...headers},body:body?(Buffer.isBuffer(body)?body:JSON.stringify(body)):undefined});
+  const request=(route,{body,headers={},method=body?'POST':'GET',requestOrigin=origin}={})=>fetch(base+route,{method,headers:{Origin:requestOrigin,...(body&&!Buffer.isBuffer(body)&&!(body instanceof FormData)?{'Content-Type':'application/json'}:{}),...headers},body:body?(Buffer.isBuffer(body)||body instanceof FormData?body:JSON.stringify(body)):undefined});
   const login=await request('/api/login',{body:{username:'admin',password}}), cookie=login.headers.get('set-cookie').split(';')[0];
   const adminHeaders={Cookie:cookie};
   const png=await sharp({create:{width:320,height:240,channels:4,background:'#efd24e'}}).png().toBuffer();
-  const avatarResponse=await request('/api/admin/avatar',{body:png,headers:{...adminHeaders,'Content-Type':'image/png'}});
+  const multipart=(buffer=png,name='中文截图📸.png')=>{const data=new FormData();data.append('image',new Blob([buffer],{type:'image/png'}),name);return data;};
+  const avatarResponse=await request('/api/admin/avatar',{body:multipart(),headers:adminHeaders});
   assert.equal(avatarResponse.status,201);const avatar=await avatarResponse.json();
   const site=await (await request('/api/admin/sites',{body:{name:'测试',origins:['*'],supportName:'晓暖',avatarId:avatar.id},headers:adminHeaders})).json();
   const session=await (await request('/api/widget/session',{body:{siteId:site.id,page:shop+'/a'},requestOrigin:shop,headers:{'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36 Edg/130.0.1'}})).json();
@@ -37,7 +38,7 @@ test('images, avatars and stickers enforce ownership and survive legacy migratio
   const other=await (await request('/api/widget/session',{body:{siteId:site.id,page:shop+'/b'},requestOrigin:shop})).json();
   const visitorHeaders={Authorization:'Bearer '+session.visitorToken,'X-Kivo-Site':site.id};
   const outsiderHeaders={Authorization:'Bearer '+other.visitorToken,'X-Kivo-Site':site.id};
-  const uploaded=await request('/api/widget/images',{body:png,headers:{...visitorHeaders,'Content-Type':'image/png'},requestOrigin:shop});
+  const uploaded=await request('/api/widget/images',{body:multipart(),headers:visitorHeaders,requestOrigin:shop});
   assert.equal(uploaded.status,201);const image=await uploaded.json();
   assert.equal((await request('/api/media/'+image.id)).status,404);
   assert.equal((await request('/api/media/'+image.id,{headers:outsiderHeaders})).status,404);
@@ -47,6 +48,10 @@ test('images, avatars and stickers enforce ownership and survive legacy migratio
   assert.equal((await sharp(Buffer.from(await (await request(avatar.avatarUrl)).arrayBuffer())).metadata()).width,160);
   assert.equal((await request('/api/widget/images',{body:png,headers:{...visitorHeaders,'Content-Type':'image/png'},requestOrigin:'https://evil.invalid'})).status,201,'all HTTP(S) websites enabled');
   assert.equal((await request('/api/admin/avatar',{body:png,headers:{...adminHeaders,'Content-Type':'image/png'},requestOrigin:shop})).status,403,'admin writes remain same-origin');
+  assert.equal((await request('/api/admin/avatar',{body:multipart()})).status,401,'multipart upload also requires login');
+  assert.equal((await request('/api/widget/images',{body:multipart(Buffer.alloc(5*1024*1024+1)),headers:visitorHeaders,requestOrigin:shop})).status,413);
+  const twoImages=multipart();twoImages.append('image',new Blob([png],{type:'image/png'}),'second.png');
+  assert.equal((await request('/api/widget/images',{body:twoImages,headers:visitorHeaders,requestOrigin:shop})).status,400);
   const count=readdirSync(path.join(dir,'media')).length;
   assert.equal((await request('/api/widget/images',{body:Buffer.from('<svg onload="alert(1)"/>'),headers:{...visitorHeaders,'Content-Type':'image/png'},requestOrigin:shop})).status,400);
   assert.equal(readdirSync(path.join(dir,'media')).length,count,'invalid files leave no residue');
@@ -61,7 +66,7 @@ test('images, avatars and stickers enforce ownership and survive legacy migratio
   assert.equal((await send(outsider,{kind:'image',mediaId:image.id,clientId:crypto.randomUUID()})).ok,false);
   assert.equal((await send(visitor,{kind:'sticker',stickerId:'evil',clientId:crypto.randomUUID()})).ok,false);
   assert.equal((await send(visitor,{kind:'sticker',stickerId:'love',clientId:crypto.randomUUID()})).ok,true);
-  const agentImage=await (await request(`/api/admin/conversations/${session.conversationId}/images`,{body:png,headers:{...adminHeaders,'Content-Type':'image/png'}})).json();
+  const agentImage=await (await request(`/api/admin/conversations/${session.conversationId}/images`,{body:multipart(),headers:adminHeaders})).json();
   assert.equal((await send(admin,{conversationId:session.conversationId,kind:'image',mediaId:agentImage.id,clientId:crypto.randomUUID()})).ok,true);
   assert.equal((await send(admin,{conversationId:session.conversationId,kind:'sticker',stickerId:'thanks',clientId:crypto.randomUUID()})).ok,true);
   const conversations=await (await request('/api/admin/conversations',{headers:adminHeaders})).json();

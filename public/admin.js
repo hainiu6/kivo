@@ -6,7 +6,7 @@ let loadingMessages = false, sending = false, toastTimer;
 let pendingMessages = [];
 let replies = [];
 let avatarUploading=false, avatarRevision=0;
-const composer = KivoChat.composer({form:$('#message-form'),input:$('#message-input'),tools:$('#chat-tools'),preview:$('#attachment-preview'),getContext:()=>socket?.connected&&!loadingMessages&&!sending?activeId:'',uploadUrl:id=>`/api/admin/conversations/${id}/images`,onError:message=>$('#send-error').textContent=message,onSubmitLock:locked=>$('#send-message').disabled=locked||sending||loadingMessages||!socket?.connected});
+const composer = KivoChat.composer({form:$('#message-form'),input:$('#message-input'),tools:$('#chat-tools'),preview:$('#attachment-preview'),dropTarget:$('#chat-active'),getContext:()=>socket?.connected&&!loadingMessages&&!sending?activeId:'',uploadUrl:id=>`/api/admin/conversations/${id}/images`,onError:message=>$('#send-error').textContent=message,onSubmitLock:locked=>$('#send-message').disabled=locked||sending||loadingMessages||!socket?.connected});
 const drafts = new Map();
 const date = ms => new Date(ms).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
 const clock = ms => new Date(ms).toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit', hour12:false });
@@ -203,12 +203,11 @@ $('#older-messages').onclick=async()=>{const id=activeId,button=$('#older-messag
 $('#add-site').onclick=()=>openSite();$('#close-dialog').onclick=()=>$('#site-dialog').close();
 $('#site-dialog').addEventListener('close',()=>{avatarRevision++;avatarUploading=false;});
 $('#avatar-file').onchange=async e=>{
-  const image=e.target.files[0];e.target.value='';if(!image)return;
-  if(!['image/png','image/jpeg','image/gif','image/webp'].includes(image.type)||image.size>5*1024*1024){$('#site-error').textContent='头像须为不超过 5 MB 的 PNG、JPEG、GIF 或 WebP';return;}
+  const image=e.target.files[0];if(!image)return;
   const revision=++avatarRevision,b=$('#site-form').querySelector('[type="submit"]');avatarUploading=true;b.disabled=true;$('#site-error').textContent='正在上传头像…';
-  try{const r=await fetch('/api/admin/avatar',{method:'POST',headers:{'Content-Type':image.type},body:image});const data=await r.json();if(!r.ok)throw new Error(data.error||'头像上传失败');if(revision!==avatarRevision)return;$('#site-form').elements.avatarId.value=data.id;$('#avatar-preview').src=data.avatarUrl;$('#site-error').textContent='';}
+  try{const data=await KivoChat.uploadImage('/api/admin/avatar',image);if(revision!==avatarRevision)return;$('#site-form').elements.avatarId.value=data.id;$('#avatar-preview').src=data.avatarUrl;$('#site-error').textContent='';}
   catch(e){if(revision===avatarRevision)$('#site-error').textContent=e.message;}
-  finally{if(revision===avatarRevision){avatarUploading=false;b.disabled=false;}}
+  finally{e.target.value='';if(revision===avatarRevision){avatarUploading=false;b.disabled=false;}}
 };
 $('#reset-avatar').onclick=()=>{avatarRevision++;avatarUploading=false;$('#site-form').elements.avatarId.value='';$('#avatar-preview').src='/support-avatar.svg';$('#site-form').querySelector('[type="submit"]').disabled=false;$('#site-error').textContent='';};
 $('#site-form').onsubmit=async e=>{e.preventDefault();if(avatarUploading)return;const f=e.currentTarget,b=f.querySelector('[type="submit"]');b.disabled=true;$('#site-error').textContent='';const fields=Object.fromEntries(new FormData(f));fields.origins=(fields.origins||'').split(/\n|,/).map(v=>v.trim()).filter(Boolean);fields.allowAll=f.elements.allowAll.checked;fields.autoReply={firstEnabled:f.elements.firstEnabled.checked,firstMessage:f.elements.firstMessage.value,offlineEnabled:f.elements.offlineEnabled.checked,offlineMessage:f.elements.offlineMessage.value};try{await api(fields.id?`/api/admin/sites/${fields.id}`:'/api/admin/sites',{method:fields.id?'PUT':'POST',body:JSON.stringify(fields)});await loadSites();$('#site-dialog').close();toast('网站设置已保存');}catch(e){$('#site-error').textContent=e.message;}finally{b.disabled=false;}};

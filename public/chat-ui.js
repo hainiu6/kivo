@@ -26,11 +26,47 @@
     }else bubble.textContent=m.body;
     return bubble;
   }
-  function composer({form,input,tools,preview,onError=()=>{},getContext,uploadUrl,headers=()=>({}),onSubmitLock=()=>{}}) {
+  const imageTypes = new Set(['image/png','image/jpeg','image/gif','image/webp']);
+  function imageType(image) {
+    const original=(image.type||'').toLowerCase();
+    const supplied={'image/jpg':'image/jpeg','image/x-png':'image/png'}[original]||original;
+    if(imageTypes.has(supplied))return supplied;
+    if(supplied&&supplied!=='application/octet-stream')return '';
+    const extension=(image.name||'').split('.').at(-1).toLowerCase();
+    return {png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp'}[extension]||'';
+  }
+  function uploadError(status) {
+    if(status===413)return '图片超过服务器上传限制，请缩小图片或调整服务器上传限制（HTTP 413）';
+    if(status===401)return '登录已过期，请重新登录后上传图片（HTTP 401）';
+    if(status===403)return '图片上传未获授权，请刷新页面重试（HTTP 403）';
+    if(status===404)return '图片上传接口不存在，请升级客服服务并刷新页面（HTTP 404）';
+    if(status===502||status===503||status===504)return `上传服务暂时不可用，请稍后重试（HTTP ${status}）`;
+    return `上传接口返回异常内容，请检查客服地址或代理配置（HTTP ${status}）`;
+  }
+  async function uploadImage(url,image,headers={}) {
+    const type=imageType(image);
+    if(!type||!image.size||image.size>5*1024*1024)throw new Error('请选择不超过 5 MB 的 PNG、JPEG、GIF 或 WebP 图片');
+    // Materialize the file before resetting the chooser; some browsers retain
+    // a lazy reference to the selected local file. Send a neutral ASCII filename.
+    let blob;
+    try { blob=new Blob([await image.arrayBuffer()],{type}); }
+    catch { throw new Error('无法读取此图片，请重新选择图片或再次粘贴截图'); }
+    const body=new FormData();body.append('image',blob,`image.${type.split('/')[1]}`);
+    let response;
+    try { response=await fetch(url,{method:'POST',credentials:'same-origin',headers,body}); }
+    catch { throw new Error('图片上传连接失败，请检查网络及客服服务地址后重试'); }
+    let data;
+    try { data=JSON.parse(await response.text()); }
+    catch { throw new Error(uploadError(response.status)); }
+    if(!response.ok)throw new Error(typeof data?.error==='string'?data.error:uploadError(response.status));
+    if(!data||typeof data.id!=='string'||!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(data.id))throw new Error(uploadError(response.status));
+    return {...data,blob};
+  }
+  function composer({form,input,tools,preview,dropTarget=form,onError=()=>{},getContext,uploadUrl,headers=()=>({}),onSubmitLock=()=>{}}) {
     let attachment=null, uploading=false, revision=0;
     const picker=el('div','emoji-picker');picker.hidden=true;picker.setAttribute('role','group');picker.setAttribute('aria-label','表情选择');
     const emoji=el('button','chat-tool','☺');emoji.type='button';emoji.title='表情和动态表情';emoji.setAttribute('aria-label','打开表情选择');emoji.setAttribute('aria-expanded','false');
-    const photo=el('button','chat-tool','＋');photo.type='button';photo.title='发送图片，也可以粘贴截图';photo.setAttribute('aria-label','选择图片');
+    const photo=el('button','chat-tool','＋');photo.type='button';photo.title='选择图片，也可以粘贴或拖入图片';photo.setAttribute('aria-label','选择图片');
     const file=el('input');file.type='file';file.accept='image/png,image/jpeg,image/gif,image/webp';file.setAttribute('aria-label','上传聊天图片');
     function toggle(open){picker.hidden=!open;emoji.setAttribute('aria-expanded',String(open));}
     emoji.onclick=()=>toggle(picker.hidden);photo.onclick=()=>file.click();
@@ -49,18 +85,34 @@
     function clear() {revision++;if(attachment?.url)URL.revokeObjectURL(attachment.url);attachment=null;uploading=false;onSubmitLock(false);renderPreview();}
     async function attachImage(image) {
       if(!getContext()){onError('请先选择会话并等待连接');return;}
-      if(!['image/png','image/jpeg','image/gif','image/webp'].includes(image.type)||image.size>5*1024*1024){onError('请选择不超过 5 MB 的 PNG、JPEG、GIF 或 WebP 图片');return;}
+      if(uploading){onError('图片正在上传，请稍候');return;}
+      if(!imageType(image)||!image.size||image.size>5*1024*1024){onError('请选择不超过 5 MB 的 PNG、JPEG、GIF 或 WebP 图片');return;}
       clear();const current=revision,context=getContext();uploading=true;onSubmitLock(true);renderPreview();onError('');
-      try{const r=await fetch(uploadUrl(context),{method:'POST',credentials:'same-origin',headers:{...headers(),'Content-Type':image.type},body:image});const data=await r.json();if(!r.ok)throw new Error(data.error||'上传失败');if(current!==revision||context!==getContext())return;attachment={kind:'image',mediaId:data.id,name:image.name||'粘贴的图片',url:URL.createObjectURL(image)};}
+      try{const data=await uploadImage(uploadUrl(context),image,headers());if(current!==revision||context!==getContext())return;attachment={kind:'image',mediaId:data.id,name:image.name||'粘贴的图片',url:URL.createObjectURL(data.blob)};}
       catch(e){if(current===revision)onError(e.message);}
       finally{if(current===revision){uploading=false;onSubmitLock(false);renderPreview();}}
     }
-    file.onchange=()=>{if(file.files[0])attachImage(file.files[0]);file.value='';};
+    file.onchange=async()=>{try{if(file.files[0])await attachImage(file.files[0]);}finally{file.value='';}};
     input.addEventListener('paste',event=>{const files=[...(event.clipboardData?.items||[])].filter(i=>i.kind==='file'&&i.type.startsWith('image/'));if(!files.length)return;event.preventDefault();if(files.length>1){onError('请每次粘贴一张图片');return;}const image=files[0].getAsFile();if(image)attachImage(image);});
+    let dragDepth=0;
+    dropTarget.classList.add('chat-drop-zone');
+    const fileDrag=event=>[...(event.dataTransfer?.types||[])].includes('Files');
+    const clearDrag=()=>{dragDepth=0;dropTarget.classList.remove('drag-over');};
+    dropTarget.addEventListener('dragenter',event=>{if(fileDrag(event)){event.preventDefault();dragDepth++;dropTarget.classList.add('drag-over');}});
+    dropTarget.addEventListener('dragover',event=>{if(fileDrag(event)){event.preventDefault();event.dataTransfer.dropEffect='copy';}});
+    dropTarget.addEventListener('dragleave',()=>{dragDepth=Math.max(0,dragDepth-1);if(!dragDepth)clearDrag();});
+    dropTarget.addEventListener('drop',event=>{
+      if(!fileDrag(event)&&!event.dataTransfer?.files?.length)return;
+      event.preventDefault();event.stopPropagation();clearDrag();
+      const files=[...(event.dataTransfer?.files||[])];
+      if(files.length!==1){onError('请每次拖入一张本地图片');return;}
+      return attachImage(files[0]);
+    });
+    document.addEventListener('dragend',clearDrag);
     form.addEventListener('keydown',event=>{if(event.key==='Escape'&&!picker.hidden){toggle(false);emoji.focus();event.stopPropagation();}});
     document.addEventListener('pointerdown',e=>{if(!tools.contains(e.target))toggle(false);});
-    return { clear, payload:()=>attachment?{kind:attachment.kind,...(attachment.mediaId?{mediaId:attachment.mediaId}:{stickerId:attachment.stickerId})}:{kind:'text'}, hasAttachment:()=>!!attachment, isUploading:()=>uploading, closePicker:()=>toggle(false), destroy:()=>{clear();toggle(false);} };
+    return { clear, payload:()=>attachment?{kind:attachment.kind,...(attachment.mediaId?{mediaId:attachment.mediaId}:{stickerId:attachment.stickerId})}:{kind:'text'}, hasAttachment:()=>!!attachment, isUploading:()=>uploading, closePicker:()=>toggle(false), destroy:()=>{clear();clearDrag();toggle(false);} };
   }
   const contrast = color => {const rgb=color.replace('#','').match(/../g)?.map(v=>parseInt(v,16))||[0,0,0];return rgb[0]*.299+rgb[1]*.587+rgb[2]*.114>155?'#233238':'#fff';};
-  window.KivoChat = { composer,renderMessage,clearImages,contrast };
+  window.KivoChat = { composer,renderMessage,clearImages,contrast,uploadImage };
 })();
