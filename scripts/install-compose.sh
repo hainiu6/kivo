@@ -58,15 +58,16 @@ chown 1000:1000 data
 chmod 700 data backups
 PASSWORD="$(openssl rand -hex 16)"
 SERVER_IP="$(hostname -I | awk '{print $1}')"
-PUBLIC_ADDRESS="${KIVO_PUBLIC_URL:-http://${SERVER_IP:-127.0.0.1}:8080}"
+PUBLIC_ADDRESS="${KIVO_PUBLIC_URL:-http://${SERVER_IP:-127.0.0.1}:8088}"
 SITE=':80'
-HTTP_PORT=8080
+HTTP_PORT=8088
+HTTPS_PORT=8443
 if [[ -n "${KIVO_DOMAIN:-}" ]]; then
   if [[ ! "$KIVO_DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then echo 'KIVO_DOMAIN 必须为有效域名，不包含协议或路径。' >&2; exit 1; fi
-  PUBLIC_ADDRESS="https://$KIVO_DOMAIN"; SITE="$KIVO_DOMAIN"; HTTP_PORT=80
+  PUBLIC_ADDRESS="https://$KIVO_DOMAIN"; SITE="$KIVO_DOMAIN"; HTTP_PORT=80; HTTPS_PORT=443
 fi
 if [[ ! "$PUBLIC_ADDRESS" =~ ^https?://[^[:space:]/]+/?$ ]]; then echo 'KIVO_PUBLIC_URL 必须为有效的 http(s)://主机:端口，不能含路径。' >&2; exit 1; fi
-printf 'PUBLIC_URL=%s\nADMIN_USERNAME=admin\nADMIN_PASSWORD=%s\nHTTP_PORT=%s\nHTTPS_PORT=443\nCADDY_SITE=%s\n' "${PUBLIC_ADDRESS%/}" "$PASSWORD" "$HTTP_PORT" "$SITE" > .env
+printf 'PUBLIC_URL=%s\nADMIN_USERNAME=admin\nADMIN_PASSWORD=%s\nHTTP_PORT=%s\nHTTPS_PORT=%s\nCADDY_SITE=%s\n' "${PUBLIC_ADDRESS%/}" "$PASSWORD" "$HTTP_PORT" "$HTTPS_PORT" "$SITE" > .env
 chmod 600 .env
 echo '→ 构建并启动（首次需要下载镜像和依赖）'
 docker compose config --quiet

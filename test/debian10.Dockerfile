@@ -1,6 +1,6 @@
 # Test fixture only: apt installs test tools here, never on deployment servers.
 FROM debian:buster-slim
-RUN printf 'deb http://archive.debian.org/debian buster main\n' > /etc/apt/sources.list \
+RUN printf 'deb http://archive.debian.org/debian buster main\ndeb http://archive.debian.org/debian-security buster/updates main\n' > /etc/apt/sources.list \
  && apt-get -o Acquire::Check-Valid-Until=false -o Acquire::http::Timeout=30 -o Acquire::Retries=2 update \
  && apt-get install -y --no-install-recommends curl ca-certificates util-linux hostname iptables procps \
  && rm -rf /var/lib/apt/lists/*

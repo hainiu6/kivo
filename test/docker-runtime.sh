@@ -9,6 +9,7 @@ docker run --name kivo-runtime-ci --rm --privileged --cgroupns private \
   -v "$REPO:/repo:ro" -v "$WORK:/fixture:ro" -e TEST_IMAGE="$IMAGE" \
   kivo/debian10-test bash -Eeuo pipefail -c '
     rm /usr/local/bin/docker
+    mkdir -p /etc/systemd/system
     cp /repo/test/runtime-systemctl.sh /usr/local/bin/systemctl
     chmod +x /usr/local/bin/systemctl
     ROOT=/opt/kivo bash /repo/scripts/install-runtime.sh || { cat /tmp/kivo-runtime.log; exit 1; }
