@@ -36,7 +36,13 @@ export function createKivo(options = {}) {
     CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL REFERENCES conversations(id), sender TEXT NOT NULL, body TEXT NOT NULL, client_id TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE(conversation_id, sender, client_id));
     CREATE INDEX IF NOT EXISTS conversations_updated ON conversations(updated_at DESC);
     CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id, id);
-    PRAGMA user_version=1;`);
+    CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS site_replies(site_id TEXT PRIMARY KEY REFERENCES sites(id), config TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS auto_reply_state(conversation_id TEXT PRIMARY KEY REFERENCES conversations(id), last_sent INTEGER NOT NULL);
+    PRAGMA user_version=2;`);
+  const defaultReplies = [{ label: '问候语', body: '你好，很高兴为你服务！' }, { label: '请稍候', body: '收到，请稍等，我帮你查看一下。' }, { label: '结束语', body: '感谢你的咨询，有其他问题随时联系我们。' }];
+  const quickReplies = () => JSON.parse(db.prepare("SELECT value FROM settings WHERE key='quickReplies'").get()?.value || JSON.stringify(defaultReplies));
+  const replyConfig = id => JSON.parse(db.prepare('SELECT config FROM site_replies WHERE site_id=?').get(id)?.config || '{"firstEnabled":false,"firstMessage":"","offlineEnabled":false,"offlineMessage":""}');
   if (!db.prepare('SELECT id FROM users LIMIT 1').get()) {
     const password = options.adminPassword || process.env.ADMIN_PASSWORD;
     if (!password || password.length < 12) { db.close(); throw new Error('First start requires ADMIN_PASSWORD with at least 12 characters.'); }
@@ -47,11 +53,12 @@ export function createKivo(options = {}) {
   const trustProxy = Number(options.trustProxy ?? process.env.TRUST_PROXY ?? 0);
   if (![0, 1].includes(trustProxy)) throw new Error('TRUST_PROXY must be 0 or 1.');
   app.set('trust proxy', trustProxy);
-  app.use(express.json({ limit: '12kb' }));
+  app.use(express.json({ limit: '256kb' }));
   const server = createServer(app);
   const siteById = id => db.prepare('SELECT * FROM sites WHERE id=?').get(id);
-  const siteAllows = (site, origin) => !!site && (origin === publicOrigin || JSON.parse(site.origins).includes(origin));
-  const isKnownOrigin = origin => origin === publicOrigin || db.prepare('SELECT origins FROM sites').all().some(s => JSON.parse(s.origins).includes(origin));
+  const originsAllow = (origins, origin) => !!originOf(origin) && originOf(origin) === origin && (origins.includes('*') || origins.includes(origin));
+  const siteAllows = (site, origin) => !!site && (origin === publicOrigin || originsAllow(JSON.parse(site.origins), origin));
+  const isKnownOrigin = origin => origin === publicOrigin || db.prepare('SELECT origins FROM sites').all().some(s => originsAllow(JSON.parse(s.origins), origin));
   // Browsers omit Origin on same-origin polling GETs; their Referer still
   // identifies our dashboard/iframe. Cross-origin requests must supply Origin.
   const socketOrigin = req => req.headers.origin || (originOf(req.headers.referer) === publicOrigin ? publicOrigin : '');
@@ -96,22 +103,37 @@ export function createKivo(options = {}) {
     const existing = db.prepare('SELECT * FROM messages WHERE conversation_id=? AND sender=? AND client_id=?').get(id, sender, data.clientId);
     if (existing) return existing;
     db.exec('BEGIN IMMEDIATE');
+    let result;
     try {
-      const result = db.prepare('INSERT INTO messages(conversation_id,sender,body,client_id,created_at) VALUES(?,?,?,?,?)').run(id, sender, data.body.trim(), data.clientId, now());
+      result = db.prepare('INSERT INTO messages(conversation_id,sender,body,client_id,created_at) VALUES(?,?,?,?,?)').run(id, sender, data.body.trim(), data.clientId, now());
       db.prepare(`UPDATE conversations SET updated_at=?, status='open', unread=unread+? WHERE id=?`).run(now(), sender === 'visitor' ? 1 : 0, id);
+      if (sender === 'auto') db.prepare('INSERT INTO auto_reply_state VALUES(?,?) ON CONFLICT(conversation_id) DO UPDATE SET last_sent=excluded.last_sent').run(id, now());
       db.exec('COMMIT');
-      const message = db.prepare('SELECT * FROM messages WHERE id=?').get(result.lastInsertRowid);
-      io.to('admins').to(`conversation:${id}`).emit('message:new', message);
-      updateConversation(id);
-      return message;
     } catch (e) { db.exec('ROLLBACK'); throw e; }
+    const message = db.prepare('SELECT * FROM messages WHERE id=?').get(result.lastInsertRowid);
+    io.to('admins').to(`conversation:${id}`).emit('message:new', message);
+    updateConversation(id);
+    if (sender === 'visitor') sendAutoReply(id);
+    return message;
+  }
+  function sendAutoReply(id) {
+    const c = db.prepare('SELECT site_id FROM conversations WHERE id=?').get(id);
+    const config = replyConfig(c.site_id);
+    if (!config.firstEnabled && !config.offlineEnabled) return;
+    const first = config.firstEnabled && db.prepare("SELECT id FROM messages WHERE conversation_id=? AND sender='visitor' LIMIT 2").all(id).length === 1;
+    const lastSent = db.prepare('SELECT last_sent FROM auto_reply_state WHERE conversation_id=?').get(id)?.last_sent || 0;
+    let body;
+    if (first && config.firstEnabled) body = config.firstMessage;
+    else if (!admins.size && config.offlineEnabled && now() - lastSent >= 300000) body = config.offlineMessage;
+    if (!body) return;
+    saveMessage(id, 'auto', { body, clientId: randomUUID() });
   }
   app.use((req, res, next) => {
     res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Permissions-Policy': 'camera=(), microphone=(), geolocation=()' });
     if (req.path === '/widget') {
       const site = siteById(req.query.site);
       const origins = site ? JSON.parse(site.origins) : [];
-      res.set('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:; frame-ancestors 'self' ${origins.join(' ')}; base-uri 'none'; form-action 'self'`);
+      res.set('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:; frame-ancestors 'self' ${origins.includes('*') ? 'http: https:' : origins.join(' ')}; base-uri 'none'; form-action 'self'`);
     } else if (!req.path.startsWith('/api/widget') && req.path !== '/widget.js') {
       res.set({ 'X-Frame-Options': 'DENY', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" });
     }
@@ -153,24 +175,45 @@ export function createKivo(options = {}) {
     for (const socket of io.of('/').sockets.values()) if (socket.data.userId === user.id) socket.disconnect(true);
     res.clearCookie('kivo_session', { path: '/' }); res.json({ ok: true });
   });
-  app.get('/api/admin/sites', (_req, res) => res.json(db.prepare('SELECT * FROM sites ORDER BY created_at').all().map(s => ({ ...s, origins: JSON.parse(s.origins) }))));
+  app.get('/api/admin/replies', (_req, res) => res.json(quickReplies()));
+  app.put('/api/admin/replies', (req, res) => {
+    const rows = req.body;
+    if (!Array.isArray(rows) || rows.length > 20 || rows.some(r => typeof r?.label !== 'string' || !r.label.trim() || r.label.length > 40 || typeof r.body !== 'string' || !r.body.trim() || r.body.length > 2000)) return res.status(400).json({ error: '最多 20 条话术，名称 1–40 字符，内容 1–2000 字符' });
+    const replies = rows.map(r => ({ label: r.label.trim(), body: r.body.trim() }));
+    db.prepare("INSERT INTO settings VALUES('quickReplies',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(replies));
+    io.to('admins').emit('replies:update', replies);
+    res.json({ ok: true });
+  });
+  app.get('/api/admin/sites', (_req, res) => res.json(db.prepare('SELECT * FROM sites ORDER BY created_at').all().map(s => ({ ...s, origins: JSON.parse(s.origins), autoReply: replyConfig(s.id) }))));
   function siteInput(body) {
     const name = text(body?.name, 60);
     const greeting = text(body?.greeting, 300) || '你好，欢迎联系我们！有什么可以帮你？';
     const color = /^#[0-9a-f]{6}$/i.test(body?.color || '') ? body.color : '#0f766e';
-    const raw = Array.isArray(body?.origins) ? body.origins : [];
+    const raw = body?.allowAll === true ? ['*'] : Array.isArray(body?.origins) ? body.origins : [];
     if (!name || !raw.length || raw.length > 20) throw new Error('请填写网站名称和 1–20 个允许的网址来源');
-    const origins = [...new Set(raw.map(v => originOf(v)))];
+    const origins = raw.length === 1 && raw[0] === '*' ? ['*'] : [...new Set(raw.map(v => originOf(v)))];
     if (origins.includes('')) throw new Error('网址必须以 http:// 或 https:// 开头');
-    return { name, greeting, color, origins: JSON.stringify(origins) };
+    const input = body?.autoReply || {};
+    const autoReply = { firstEnabled: input.firstEnabled === true, firstMessage: text(input.firstMessage, 2000), offlineEnabled: input.offlineEnabled === true, offlineMessage: text(input.offlineMessage, 2000) };
+    if ((autoReply.firstEnabled && !autoReply.firstMessage) || (autoReply.offlineEnabled && !autoReply.offlineMessage) || [input.firstMessage, input.offlineMessage].some(v => typeof v === 'string' && v.length > 2000)) throw new Error('启用的自动回复须填写 1–2000 字符的内容');
+    return { name, greeting, color, origins: JSON.stringify(origins), autoReply };
+  }
+  function saveSite(id, s, create) {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      if (create) db.prepare('INSERT INTO sites VALUES(?,?,?,?,?,?)').run(id, s.name, s.origins, s.color, s.greeting, now());
+      else db.prepare('UPDATE sites SET name=?,origins=?,color=?,greeting=? WHERE id=?').run(s.name, s.origins, s.color, s.greeting, id);
+      db.prepare('INSERT INTO site_replies VALUES(?,?) ON CONFLICT(site_id) DO UPDATE SET config=excluded.config').run(id, JSON.stringify(s.autoReply));
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
   }
   app.post('/api/admin/sites', (req, res) => {
-    try { const s = siteInput(req.body); const id = randomUUID(); db.prepare('INSERT INTO sites VALUES(?,?,?,?,?,?)').run(id, s.name, s.origins, s.color, s.greeting, now()); res.status(201).json({ id }); }
+    try { const s = siteInput(req.body); const id = randomUUID(); saveSite(id, s, true); res.status(201).json({ id }); }
     catch (e) { res.status(400).json({ error: e.message }); }
   });
   app.put('/api/admin/sites/:id', (req, res) => {
     if (!siteById(req.params.id)) return res.status(404).json({ error: '网站不存在' });
-    try { const s = siteInput(req.body); db.prepare('UPDATE sites SET name=?,origins=?,color=?,greeting=? WHERE id=?').run(s.name, s.origins, s.color, s.greeting, req.params.id); res.json({ ok: true }); }
+    try { const s = siteInput(req.body); if (req.body.autoReply === undefined) s.autoReply = replyConfig(req.params.id); saveSite(req.params.id, s, false); res.json({ ok: true }); }
     catch (e) { res.status(400).json({ error: e.message }); }
   });
   app.get('/api/admin/conversations', (req, res) => {
@@ -231,6 +274,7 @@ export function createKivo(options = {}) {
       socket.data.role = 'admin'; socket.data.userId = user.id; socket.data.sessionHash = hash(cookieToken(socket.request));
     } else {
       if (!validToken(auth.visitorToken) || !uuid(auth.siteId)) return next(new Error('访客凭证无效'));
+      if (!siteAllows(siteById(auth.siteId), socketOrigin(socket.request))) return next(new Error('来源无效'));
       const c = db.prepare('SELECT id FROM conversations WHERE site_id=? AND visitor_hash=?').get(auth.siteId,hash(auth.visitorToken));
       if (!c) return next(new Error('访客凭证无效'));
       socket.data.role = 'visitor'; socket.data.conversationId = c.id;

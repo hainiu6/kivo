@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag (e.g. v1.1.0); must be new'
+        description: 'Release tag (e.g. v1.2.0); must be new'
         required: true
-        default: v1.1.1
+        default: v1.2.0
   push:
     tags: ['v*']
 permissions:
@@ -64,5 +64,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。\n\n服务器无需 apt、Git、npm 或 Compose。安装与升级命令见仓库 README。升级前自动备份，健康检查失败恢复旧容器。两个架构均通过 Debian 10 用户空间的安装、升级、数据保留、端口冲突与失败回退测试（CI 主机内核）。\n' > release-notes.md
+          printf 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。\n\n新增：允许所有网站接入、全高加宽会话列表、可编辑常用话术、按网站设置首次留言与离线自动回复。设置和聊天数据在升级后保留。\n\n服务器无需 apt、Git、npm 或 Compose。安装与升级命令见仓库 README。升级前自动备份，健康检查失败恢复旧容器。两个架构均通过 Debian 10 用户空间的安装、升级、数据保留、端口冲突与失败回退测试（CI 主机内核）。\n' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md

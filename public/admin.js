@@ -4,6 +4,7 @@ const $$ = selector => [...document.querySelectorAll(selector)];
 let socket, publicUrl, sites = [], conversations = [], activeId = null, activeMessages = [], status = 'open', view = 'inbox', selectionRevision = 0, listRevision = 0;
 let loadingMessages = false, sending = false, toastTimer;
 let pendingMessages = [];
+let replies = [];
 const drafts = new Map();
 const date = ms => new Date(ms).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
 const clock = ms => new Date(ms).toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit', hour12:false });
@@ -18,16 +19,18 @@ async function api(url, options = {}) {
 const post = (url, data = {}) => api(url,{method:'POST',body:JSON.stringify(data)});
 function showLogin() { socket?.disconnect(); $('#workspace').hidden = true; $('#login-screen').hidden = false; activeId = null; $('#chat-empty').hidden = false; $('#chat-active').hidden = true; $('#visitor-empty').hidden = false; $('#visitor-details').hidden = true; }
 function switchView(next) {
-  view = next; ['inbox','sites','settings'].forEach(v => $(`#view-${v}`).hidden = v !== next);
+  view = next; ['inbox','sites','replies','settings'].forEach(v => $(`#view-${v}`).hidden = v !== next);
+  $('#workspace').classList.toggle('inbox-mode', next === 'inbox');
   $$('.nav-button').forEach(b => b.classList.toggle('active',b.dataset.view === next));
-  $('#page-label').textContent = {inbox:'会话收件箱',sites:'网站接入',settings:'账号设置'}[next];
+  $('#page-label').textContent = {inbox:'会话收件箱',sites:'网站接入',replies:'回复设置',settings:'账号设置'}[next];
   if (next === 'inbox') loadConversations().catch(e => toast(e.message));
 }
 async function start() {
   const me = await api('/api/admin/me'); publicUrl = me.publicUrl;
   $('#account-name').textContent = me.username; $('#service-url').textContent = publicUrl;
   $('#today').textContent = new Date().toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'});
-  await loadSites(); await loadConversations();
+  await loadSites(); await loadConversations(); await loadReplies();
+  switchView(view);
   $('#login-screen').hidden = true; $('#workspace').hidden = false;
   socket?.disconnect(); socket = io({ auth:{role:'admin'}, reconnection:true });
   socket.on('connect', () => {
@@ -51,7 +54,22 @@ async function start() {
       else { addMessage(message); if (view === 'inbox' && !document.hidden) markRead(); }
     }
   });
+  socket.on('replies:update', rows => { replies = rows; renderQuickReplies(); });
 }
+async function loadReplies() { replies = await api('/api/admin/replies'); renderQuickReplies(); renderReplyEditor(); }
+function renderQuickReplies() {
+  $('#quick-replies').replaceChildren();
+  replies.forEach(r => { const b = element('button', '', r.label); b.type = 'button'; b.title = r.body; b.onclick = () => { $('#message-input').value = r.body; $('#message-input').focus(); }; $('#quick-replies').append(b); });
+}
+function updateReplyCount() { const n = $('#reply-editor').children.length; $('#reply-count').textContent = `(${n}/20)`; $('#add-reply').disabled = n >= 20; }
+function appendReply(r = {label:'',body:''}) {
+  const row = element('div', 'reply-row'), heading = element('div', 'reply-row-heading');
+  const label = element('label', '', '话术名称'), input = element('input'); input.value = r.label; input.maxLength = 40; input.required = true; input.placeholder = '例如：配送时间'; input.dataset.field = 'label'; label.append(input);
+  const remove = element('button', 'button small secondary', '删除'); remove.type = 'button'; remove.onclick = () => { row.remove(); updateReplyCount(); };
+  heading.append(label, remove); const body = element('label', '', '话术内容'), area = element('textarea'); area.value = r.body; area.rows = 3; area.required = true; area.maxLength = 2000; area.dataset.field = 'body'; body.append(area);
+  row.append(heading, body); $('#reply-editor').append(row); updateReplyCount(); return input;
+}
+function renderReplyEditor() { $('#reply-editor').replaceChildren(); replies.forEach(appendReply); updateReplyCount(); }
 async function loadSites() {
   sites = await api('/api/admin/sites');
   const selected = $('#site-filter').value;
@@ -114,7 +132,7 @@ function renderMessages() {
   const container=$('#message-items');container.replaceChildren();
   if(!activeMessages.length)container.append(element('p','muted','访客还没有发送消息。用一句问候开始对话吧。'));
   activeMessages.forEach(m=>{
-    const row=element('div',`message-row ${m.sender}`);row.append(element('div','message-meta',`${m.sender==='agent'?'客服':'访客'} · ${date(m.created_at)}`),element('div','bubble',m.body));container.append(row);
+    const row=element('div',`message-row ${m.sender}`);row.append(element('div','message-meta',`${m.sender==='auto'?'自动回复':m.sender==='agent'?'客服':'访客'} · ${date(m.created_at)}`),element('div','bubble',m.body));container.append(row);
   });
 }
 function addMessage(m) {
@@ -132,7 +150,9 @@ function renderSites() {
   if(!sites.length){const empty=element('div','panel');empty.append(element('h2','','准备好接待第一位访客了吗？'),element('p','muted','添加网站后，复制生成的 JavaScript 代码到网页，即可启用右下角的客服窗口。'));list.append(empty);return;}
   sites.forEach(s=>{
     const card=element('article','site-card'),header=element('div','site-card-header');const edit=element('button','button secondary small','编辑设置');edit.onclick=()=>openSite(s);header.append(element('h2','',s.name),edit);
-    const origins=element('div','site-origins');s.origins.forEach(o=>origins.append(element('span','',o)));
+    const origins=element('div','site-origins');s.origins.forEach(o=>origins.append(element('span','',o==='*'?'允许所有网站':o)));
+    if(s.autoReply?.firstEnabled) origins.append(element('span','','首次留言自动回复'));
+    if(s.autoReply?.offlineEnabled) origins.append(element('span','','离线自动回复'));
     const code=element('textarea','embed-code');code.value=embedCode(s);code.readOnly=true;code.setAttribute('aria-label',`${s.name} 的嵌入代码`);
     const actions=element('div','site-actions');const copy=element('button','button primary small','复制嵌入代码');copy.onclick=async()=>{try{await navigator.clipboard.writeText(code.value);toast('嵌入代码已复制');}catch{code.select();toast('请按 Ctrl+C / ⌘C 复制选中的代码');}};
     const demo=element('a','text-link','打开测试页面 ↗');demo.href=`/demo?site=${encodeURIComponent(s.id)}`;demo.target='_blank';demo.rel='noopener';actions.append(copy,demo);
@@ -141,7 +161,14 @@ function renderSites() {
 }
 function openSite(s) {
   const f=$('#site-form');f.reset();f.elements.id.value=s?.id||'';f.elements.name.value=s?.name||'';f.elements.origins.value=s?.origins.join('\n')||'';f.elements.color.value=s?.color||'#0f766e';f.elements.greeting.value=s?.greeting||'你好，欢迎联系我们！有什么可以帮你？';$('#site-form-title').textContent=s?'编辑网站':'添加网站';$('#site-error').textContent='';$('#site-dialog').showModal();
+  f.elements.allowAll.checked = s?.origins.includes('*') || false;
+  if(f.elements.allowAll.checked) f.elements.origins.value = '';
+  for(const key of ['firstEnabled','offlineEnabled']) f.elements[key].checked = s?.autoReply?.[key] || false;
+  for(const key of ['firstMessage','offlineMessage']) f.elements[key].value = s?.autoReply?.[key] || '';
+  syncSiteFields();
 }
+function syncSiteFields() { const f = $('#site-form'); f.elements.origins.disabled = f.elements.allowAll.checked; f.elements.origins.required = !f.elements.allowAll.checked; $('#origins-field').hidden = f.elements.allowAll.checked; for(const prefix of ['first','offline']) { f.elements[prefix+'Message'].disabled = !f.elements[prefix+'Enabled'].checked; f.elements[prefix+'Message'].required = f.elements[prefix+'Enabled'].checked; } }
+['allowAll','firstEnabled','offlineEnabled'].forEach(key => $('#site-form').elements[key].onchange = syncSiteFields);
 $('#login-form').onsubmit=async e=>{e.preventDefault();const f=e.currentTarget,b=f.querySelector('button');b.disabled=true;$('#login-error').textContent='';try{await post('/api/login',Object.fromEntries(new FormData(f)));await start();f.elements.password.value='';}catch(e){$('#login-error').textContent=e.message;}finally{b.disabled=false;}};
 $$('.nav-button').forEach(b=>b.onclick=()=>switchView(b.dataset.view));$('#guide-sites').onclick=$('#empty-sites').onclick=()=>switchView('sites');
 $('#logout').onclick=$('#settings-logout').onclick=async()=>{try{await post('/api/admin/logout');showLogin();}catch(e){toast(e.message);}};
@@ -152,7 +179,9 @@ $('#back-list').onclick=()=>$('.inbox-grid').classList.remove('chat-selected');
 $('#toggle-visitor').onclick=()=>{const open=$('.inbox-grid').classList.toggle('show-details');$('#toggle-visitor').setAttribute('aria-expanded',String(open));};
 $('#close-visitor').onclick=()=>{$('.inbox-grid').classList.remove('show-details');$('#toggle-visitor').setAttribute('aria-expanded','false');$('#toggle-visitor').focus();};
 $('#close-conversation').onclick=async()=>{try{await post(`/api/admin/conversations/${activeId}/status`,{status:$('#close-conversation').dataset.status==='closed'?'open':'closed'});}catch(e){toast(e.message);}};
-$$('[data-reply]').forEach(b=>b.onclick=()=>{$('#message-input').value=b.dataset.reply;$('#message-input').focus();});
+$('#replies-sites').onclick=()=>switchView('sites');
+$('#add-reply').onclick=()=>{if($('#reply-editor').children.length<20)appendReply().focus();};
+$('#replies-form').onsubmit=async e=>{e.preventDefault();const b=e.currentTarget.querySelector('[type="submit"]');b.disabled=true;$('#replies-error').textContent='';const rows=[...$('#reply-editor').children].map(row=>({label:row.querySelector('[data-field="label"]').value,body:row.querySelector('[data-field="body"]').value}));try{await api('/api/admin/replies',{method:'PUT',body:JSON.stringify(rows)});await loadReplies();toast('常用话术已保存');}catch(e){$('#replies-error').textContent=e.message;}finally{b.disabled=false;}};
 $('#message-input').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();$('#message-form').requestSubmit();}};
 $('#message-form').onsubmit=e=>{
   e.preventDefault();if(!activeId||loadingMessages||sending)return;const body=$('#message-input').value.trim();if(!body)return;
@@ -166,7 +195,7 @@ $('#message-form').onsubmit=e=>{
 };
 $('#older-messages').onclick=async()=>{const id=activeId,button=$('#older-messages');button.disabled=true;try{const rows=await api(`/api/admin/conversations/${id}/messages?before=${activeMessages[0]?.id||0}`);if(id!==activeId)return;const height=$('#messages').scrollHeight;activeMessages=[...rows,...activeMessages];renderMessages();$('#messages').scrollTop+=$('#messages').scrollHeight-height;button.hidden=rows.length<100;}catch(e){toast(e.message);}finally{button.disabled=false;}};
 $('#add-site').onclick=()=>openSite();$('#close-dialog').onclick=()=>$('#site-dialog').close();
-$('#site-form').onsubmit=async e=>{e.preventDefault();const f=e.currentTarget,b=f.querySelector('[type="submit"]');b.disabled=true;$('#site-error').textContent='';const fields=Object.fromEntries(new FormData(f));fields.origins=fields.origins.split(/\n|,/).map(v=>v.trim()).filter(Boolean);try{await api(fields.id?`/api/admin/sites/${fields.id}`:'/api/admin/sites',{method:fields.id?'PUT':'POST',body:JSON.stringify(fields)});await loadSites();$('#site-dialog').close();toast('网站设置已保存');}catch(e){$('#site-error').textContent=e.message;}finally{b.disabled=false;}};
+$('#site-form').onsubmit=async e=>{e.preventDefault();const f=e.currentTarget,b=f.querySelector('[type="submit"]');b.disabled=true;$('#site-error').textContent='';const fields=Object.fromEntries(new FormData(f));fields.origins=(fields.origins||'').split(/\n|,/).map(v=>v.trim()).filter(Boolean);fields.allowAll=f.elements.allowAll.checked;fields.autoReply={firstEnabled:f.elements.firstEnabled.checked,firstMessage:f.elements.firstMessage.value,offlineEnabled:f.elements.offlineEnabled.checked,offlineMessage:f.elements.offlineMessage.value};try{await api(fields.id?`/api/admin/sites/${fields.id}`:'/api/admin/sites',{method:fields.id?'PUT':'POST',body:JSON.stringify(fields)});await loadSites();$('#site-dialog').close();toast('网站设置已保存');}catch(e){$('#site-error').textContent=e.message;}finally{b.disabled=false;}};
 $('#password-form').onsubmit=async e=>{e.preventDefault();const f=e.currentTarget,data=Object.fromEntries(new FormData(f));if(data.newPassword!==data.confirmPassword){toast('两次输入的新密码不一致');return;}const b=f.querySelector('button');b.disabled=true;try{await post('/api/admin/password',data);f.reset();showLogin();toast('密码已更新，请重新登录');}catch(e){toast(e.message);}finally{b.disabled=false;}};
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&socket?.connected){if(activeId)selectConversation(activeId).catch(e=>toast(e.message));loadConversations().catch(e=>toast(e.message));}});
 start().catch(e=>{showLogin();if(!e.message.includes('先登录'))$('#login-error').textContent=e.message;});

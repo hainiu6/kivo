@@ -8,13 +8,13 @@ function render() {
   const nearBottom=$('messages').scrollHeight-$('messages').scrollTop-$('messages').clientHeight<80;
   $('message-items').replaceChildren();
   rows.forEach(m=>{
-    const wrapper=document.createElement('div');wrapper.className=`message ${m.sender}`;
-    const meta=document.createElement('div');meta.className='meta';meta.textContent=`${m.sender==='agent'?'客服':'你'} · ${new Date(m.created_at).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false})}`;
+    const wrapper=document.createElement('div');wrapper.className=`message ${m.sender==='auto'?'agent auto':m.sender}`;
+    const meta=document.createElement('div');meta.className='meta';meta.textContent=`${m.sender==='auto'?'自动回复':m.sender==='agent'?'客服':'你'} · ${new Date(m.created_at).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false})}`;
     const bubble=document.createElement('div');bubble.className='bubble';bubble.textContent=m.body;wrapper.append(meta,bubble);$('message-items').append(wrapper);
   });
   if(nearBottom)$('messages').scrollTop=$('messages').scrollHeight;
 }
-function add(m) { if(rows.some(r=>r.id===m.id))return;rows.push(m);rows.sort((a,b)=>a.id-b.id);render();if(m.sender==='agent'&&!opened)tell('unread'); }
+function add(m) { if(rows.some(r=>r.id===m.id))return;rows.push(m);rows.sort((a,b)=>a.id-b.id);render();if(m.sender!=='visitor'&&!opened)tell('unread'); }
 function initialize(data, origin) {
   if(initialized||data.site?.id!==siteId||origin!==data.parentOrigin)return;
   const page=new URL(data.page);if(page.origin!==origin)return;
