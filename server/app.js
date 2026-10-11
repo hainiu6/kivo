@@ -15,6 +15,7 @@ import multer from 'multer';
 import { verifyIdentity } from './identity.js';
 import { registerHistoryRoutes } from './history.js';
 import { visitorIP } from './ip.js';
+import { registerStatsRoutes } from './stats.js';
 
 const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -221,6 +222,7 @@ export function createKivo(options = {}) {
     res.json({ username: user.username });
   });
   app.use('/api/admin', adminOnly);
+  registerStatsRoutes(app, { db, visitors });
   app.use('/api/admin', (req, res, next) => ['GET', 'HEAD'].includes(req.method) ? next() : sameOrigin(req, res, next));
   app.post('/api/admin/avatar', imageLimiter, imageBody, upload('avatar'));
   app.post('/api/admin/conversations/:id/images', (req, res, next) => {
