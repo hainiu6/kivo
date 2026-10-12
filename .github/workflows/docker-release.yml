@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag (e.g. v1.9.1); must be new'
+        description: 'Release tag (e.g. v1.9.2); must be new'
         required: true
-        default: v1.9.1
+        default: v1.9.2
   push:
     tags: ['v*']
 permissions:
@@ -65,5 +65,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '访客聊天窗新增醒目的客服状态标签：绿色客服在线、橙色客服离线，离线时另行显示留言说明。网络断开和重连使用独立状态，避免误判客服是否在线。' '去掉用户端和后台的 Enter / Shift + Enter 提示文字，原有发送和换行操作继续可用。' '提示音换为更清晰、响亮的一声叮，提高音量并延长衰减；保持静音偏好、点击启用、试听、连续消息合并及重复消息去重。' '通过 44 项测试及浏览器状态切换、离线留言、键盘发送和换行检查。双架构容器与 Debian 10 安装升级测试验证数据保留。' '执行 bash /opt/kivo/scripts/upgrade.sh 后强制刷新后台及接入网站。' > release-notes.md
+          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '地区识别更新为 DB-IP 2026 年 10 月本地国家库，修复 179.255.146.39、179.255.158.39 被旧库误识别为巴西的问题；现在显示美国，不再附带错误的巴西城市。' '客服与访问统计的历史地区显示按当前库更新，无需清空记录，PV、UV 和消息保留。查询在本地完成，支持自定义 Country / City MMDB。' '通过 47 项测试，验证历史记录显示修正、自定义库回退及 IPv4 / IPv6；双架构镜像与 Debian 10 安装升级测试验证地区库及数据保留。' '执行 bash /opt/kivo/scripts/upgrade.sh 后强制刷新后台。' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md

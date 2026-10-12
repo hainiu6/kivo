@@ -4,6 +4,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFile } from 'node:fs/promises';
 import sharp from 'sharp';
 import { createHmac, randomUUID } from 'node:crypto';
+import { createRegionLookup } from '/app/server/region.js';
+
+const region = createRegionLookup({ dataDir: '/app/data' });
+for (const ip of ['179.255.146.39', '179.255.158.39']) assert.equal(region(ip), '美国', 'released image includes current country data');
+assert.equal(region('172.17.0.1'), '未知 / 内网');
 
 const base = 'http://127.0.0.1:3000';
 const origin = process.env.PUBLIC_URL;

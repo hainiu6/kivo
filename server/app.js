@@ -8,7 +8,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import bcrypt from 'bcryptjs';
-import geoip from 'geoip-lite';
+import { createRegionLookup } from './region.js';
 import { deviceInfo } from './device.js';
 import { MAX_IMAGE_BYTES, storeImage } from './media.js';
 import multer from 'multer';
@@ -115,16 +115,10 @@ export function createKivo(options = {}) {
   const adminOnly = (req, res, next) => { req.user = sessionUser(req); req.user ? next() : res.status(401).json({ error: '请先登录' }); };
   const sameOrigin = (req, res, next) => req.headers.origin === publicOrigin ? next() : res.status(403).json({ error: '请求来源不允许，请检查 PUBLIC_URL' });
   const ipOf = req => visitorIP(req, trustProxy);
-  const regionOf = ip => {
-    const geo = geoip.lookup(ip);
-    if (!geo) return '未知 / 内网';
-    let country = geo.country;
-    try { country = new Intl.DisplayNames(['zh-CN'], { type: 'region' }).of(geo.country); } catch { /* keep ISO code */ }
-    return [country, geo.region, geo.city].filter(Boolean).join(' · ');
-  };
+  const regionOf = createRegionLookup({ dataDir });
   const conversation = id => {
     const c = db.prepare(`SELECT c.*, s.name AS site_name, COALESCE(d.os,'未知系统') AS os, COALESCE(d.browser,'未知浏览器') AS browser, u.user_id,u.account,u.nickname,l.name AS visitor_name, (SELECT CASE kind WHEN 'image' THEN '[图片] ' || body WHEN 'sticker' THEN '[动态表情]' ELSE body END FROM messages WHERE conversation_id=c.id ORDER BY id DESC LIMIT 1) AS last_message FROM conversations c JOIN sites s ON c.site_id=s.id LEFT JOIN visitor_devices d ON d.conversation_id=c.id LEFT JOIN website_users u ON u.conversation_id=c.id LEFT JOIN visitor_labels l ON l.conversation_id=c.id WHERE c.id=?`).get(id);
-    return c ? { ...c, visitor_hash: undefined, online: (visitors.get(id)?.size || 0) > 0 } : null;
+    return c ? { ...c, region: regionOf(c.ip), visitor_hash: undefined, online: (visitors.get(id)?.size || 0) > 0 } : null;
   };
   const updateConversation = id => io.to('admins').emit('conversation:update', conversation(id));
   const messages = (id, before) => {
