@@ -1,4 +1,4 @@
-/* global io, KivoChat, KivoNotifications, KivoWorkspaceState, KivoStats */
+/* global io, KivoChat, KivoNotifications, KivoWorkspaceState, KivoStats, KivoAnalytics */
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 let socket, publicUrl, sites = [], conversations = [], activeId = null, activeMessages = [], status = 'open', view = 'inbox', selectionRevision = 0, listRevision = 0;
@@ -42,6 +42,7 @@ const notifications = KivoNotifications.create({button:$('#notification-sound'),
   $('#nav-unread').textContent=total>99?'99+':total;$('#nav-unread').hidden=!total;
 }});
 const stats = KivoStats.create({api,onChange:()=>rememberWorkspace()});
+const analytics = KivoAnalytics.create({api,publicUrl:()=>publicUrl,onChange:()=>rememberWorkspace(),onMessage:toast});
 function setSidebar(collapsed) {
   $('#workspace').classList.toggle('sidebar-collapsed',collapsed);
   const button=$('#sidebar-toggle');button.setAttribute('aria-expanded',String(!collapsed));
@@ -65,17 +66,17 @@ async function api(url, options = {}) {
   return data;
 }
 const post = (url, data = {}) => api(url,{method:'POST',body:JSON.stringify(data)});
-function showLogin() { presenceRevision++; authenticated=false;accountUsername='';KivoWorkspaceState.clear();view='inbox';status='open';selectionRevision++;listRevision++;loadingMessages=false;drafts.clear();$('#loading-screen').hidden=true; stats.reset();notifications.reset(); $('#delete-dialog').close(); $('#identity-dialog').close(); $('#identity-secret').value=''; $('#site-dialog').close(); socket?.disconnect(); composer.destroy(); KivoChat.clearImages(); $('#workspace').hidden = true; $('#login-screen').hidden = false; activeId = null; $('#chat-empty').hidden = false; $('#chat-active').hidden = true; $('#visitor-empty').hidden = false; $('#visitor-details').hidden = true; }
-function rememberWorkspace() { if(authenticated)KivoWorkspaceState.save(accountUsername,{view,status,site:$('#site-filter').value,query:$('#search').value,conversation:activeId||'',draft:$('#message-input').value,...stats.getFilters()}); }
+function showLogin() { presenceRevision++; authenticated=false;accountUsername='';KivoWorkspaceState.clear();view='inbox';status='open';selectionRevision++;listRevision++;loadingMessages=false;drafts.clear();$('#loading-screen').hidden=true; stats.reset();analytics.reset();notifications.reset(); $('#delete-dialog').close(); $('#identity-dialog').close(); $('#identity-secret').value=''; $('#site-dialog').close(); socket?.disconnect(); composer.destroy(); KivoChat.clearImages(); $('#workspace').hidden = true; $('#login-screen').hidden = false; activeId = null; $('#chat-empty').hidden = false; $('#chat-active').hidden = true; $('#visitor-empty').hidden = false; $('#visitor-details').hidden = true; }
+function rememberWorkspace() { if(authenticated)KivoWorkspaceState.save(accountUsername,{view,status,site:$('#site-filter').value,query:$('#search').value,conversation:activeId||'',draft:$('#message-input').value,...stats.getFilters(),...analytics.getFilters()}); }
 function switchView(next,load=true) {
-  view = next; ['inbox','sites','replies','stats','settings'].forEach(v => $(`#view-${v}`).hidden = v !== next);
+  view = next; ['inbox','sites','replies','stats','analytics','settings'].forEach(v => $(`#view-${v}`).hidden = v !== next);
   $('#workspace').classList.toggle('inbox-mode', next === 'inbox');
   $$('.nav-button').forEach(b => b.classList.toggle('active',b.dataset.view === next));
-  $('#page-label').textContent = {inbox:'会话收件箱',sites:'网站接入',replies:'回复设置',stats:'数据统计',settings:'账号设置'}[next];
+  $('#page-label').textContent = {inbox:'会话收件箱',sites:'网站接入',replies:'回复设置',stats:'数据统计',analytics:'访问统计',settings:'账号设置'}[next];
   if(window.matchMedia('(max-width:850px)').matches)setSidebar(true);
   if(load)rememberWorkspace();
   if (next === 'inbox'&&load) loadConversations().catch(e => toast(e.message));
-  if(load){if(next==='stats')stats.activate();else stats.deactivate();}
+  if(load){if(next==='stats')stats.activate();else stats.deactivate();if(next==='analytics')analytics.activate();else analytics.deactivate();}
 }
 async function start() {
   const me = await api('/api/admin/me'); publicUrl = me.publicUrl;
@@ -87,11 +88,11 @@ async function start() {
   switchView(view,false);$('#loading-screen').hidden=true;$('#login-screen').hidden=true;$('#workspace').hidden=false;
   $('#account-name').textContent = me.username; $('#service-url').textContent = publicUrl;
   $('#today').textContent = new Date().toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'});
-  await loadSites();$('#site-filter').value=sites.some(s=>s.id===saved.site)?saved.site:'';stats.setFilters(saved);
+  await loadSites();$('#site-filter').value=sites.some(s=>s.id===saved.site)?saved.site:'';stats.setFilters(saved);analytics.setFilters(saved);
   await loadConversations(); await loadReplies();
   $('#login-screen').hidden = true; $('#workspace').hidden = false;
   notifications.start();
-  if(view==='stats')stats.activate();
+  if(view==='stats')stats.activate();if(view==='analytics')analytics.activate();
   socket?.disconnect(); socket = io({ auth:{role:'admin'}, reconnection:true });
   socket.on('connect', () => {
     notifications.refresh();
@@ -364,7 +365,7 @@ $('#avatar-file').onchange=async e=>{
 $('#reset-avatar').onclick=()=>{avatarRevision++;avatarUploading=false;$('#site-form').elements.avatarId.value='';$('#avatar-preview').src='/support-avatar.svg';$('#site-form').querySelector('[type="submit"]').disabled=false;$('#site-error').textContent='';};
 $('#site-form').onsubmit=async e=>{e.preventDefault();if(avatarUploading)return;const f=e.currentTarget,b=f.querySelector('[type="submit"]');b.disabled=true;$('#site-error').textContent='';const fields=Object.fromEntries(new FormData(f));fields.origins=(fields.origins||'').split(/\n|,/).map(v=>v.trim()).filter(Boolean);fields.allowAll=f.elements.allowAll.checked;fields.autoReply={firstEnabled:f.elements.firstEnabled.checked,firstMessage:f.elements.firstMessage.value,offlineEnabled:f.elements.offlineEnabled.checked,offlineMessage:f.elements.offlineMessage.value};try{await api(fields.id?`/api/admin/sites/${fields.id}`:'/api/admin/sites',{method:fields.id?'PUT':'POST',body:JSON.stringify(fields)});await loadSites();$('#site-dialog').close();toast('网站设置已保存');}catch(e){$('#site-error').textContent=e.message;}finally{b.disabled=false;}};
 $('#password-form').onsubmit=async e=>{e.preventDefault();const f=e.currentTarget,data=Object.fromEntries(new FormData(f));if(data.newPassword!==data.confirmPassword){toast('两次输入的新密码不一致');return;}const b=f.querySelector('button');b.disabled=true;try{await post('/api/admin/password',data);f.reset();showLogin();toast('密码已更新，请重新登录');}catch(e){toast(e.message);}finally{b.disabled=false;}};
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&socket?.connected){notifications.refresh();stats.schedule();if(activeId)selectConversation(activeId).catch(e=>toast(e.message));loadConversations().catch(e=>toast(e.message));}});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&socket?.connected){notifications.refresh();stats.schedule();analytics.schedule();if(activeId)selectConversation(activeId).catch(e=>toast(e.message));loadConversations().catch(e=>toast(e.message));}});
 async function restoreWorkspace() {
   if(starting)return;starting=true;$('#retry-start').disabled=true;
   try { await start(); }

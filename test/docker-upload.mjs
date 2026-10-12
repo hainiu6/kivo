@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFile } from 'node:fs/promises';
 import sharp from 'sharp';
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 
 const base = 'http://127.0.0.1:3000';
 const origin = process.env.PUBLIC_URL;
@@ -16,6 +16,12 @@ const json = async (route, body, cookie = '', requestOrigin = origin) => {
 };
 const login = await json('/api/login', { username: process.env.ADMIN_USERNAME || 'admin', password: process.env.ADMIN_PASSWORD });
 if (process.argv[2] !== 'verify') {
+  const { data: tracking } = await json('/api/admin/analytics/sites', { name: 'Docker 访问统计测试' }, login.cookie);
+  const browserId = randomUUID();
+  for (const page of ['https://any-domain.example/', 'https://another-domain.example/products']) {
+    const collected = await fetch(base + '/api/analytics/collect', { method: 'POST', headers: { Origin: new URL(page).origin, 'Content-Type': 'text/plain' }, body: JSON.stringify({ siteId: tracking.id, eventId: randomUUID(), visitorId: browserId, page, title: '容器统计页面' }) });
+    assert.equal(collected.status, 204);
+  }
   const png = await sharp({ create: { width: 24, height: 24, channels: 4, background: '#0f766e' } }).png().toBuffer();
   const upload = async (route, headers, expected = 201) => {
     const body = new FormData();
@@ -45,6 +51,12 @@ if (process.argv[2] !== 'verify') {
   assert.equal((await fetch(base+`/api/admin/conversations/${disposable.conversationId}/messages`,{headers:{Cookie:login.cookie}})).status,404);
 }
 const db = new DatabaseSync('/app/data/kivo.sqlite', { readOnly: true });
+const tracking = db.prepare('SELECT id FROM analytics_sites WHERE name=?').get('Docker 访问统计测试');
+assert.equal(db.prepare('SELECT COUNT(*) AS n FROM page_views WHERE site_id=?').get(tracking.id).n, 2, 'analytics sites and visits survive upgrade');
+const trafficResponse = await fetch(base + '/api/admin/analytics/stats?site=' + tracking.id, { headers: { Cookie: login.cookie } });
+assert.equal(trafficResponse.status, 200);
+const traffic = await trafficResponse.json();
+assert.equal(traffic.summary.pv, 2); assert.equal(traffic.summary.uv, 1); assert.equal(traffic.domains.length, 2);
 const account=db.prepare('SELECT u.*,i.secret FROM website_users u JOIN site_identity i ON u.site_id=i.site_id WHERE u.user_id=?').get('docker-user');
 assert.equal(db.prepare('SELECT name FROM visitor_labels WHERE name=?').get('PHP Session 用户').name,'PHP Session 用户','session display names survive upgrade');
 assert.equal(account.account,'docker@example.com');assert.match(account.secret,/^[a-f0-9]{64}$/);
@@ -62,4 +74,4 @@ for (const item of media) {
   assert.deepEqual(downloaded, await readFile('/app/data/media/' + item.id + '.webp'));
 }
 db.close();
-console.log('Container uploads, history deletion, account identity, authentication and persisted media passed.');
+console.log('Container analytics persistence, uploads, history deletion, account identity, authentication and persisted media passed.');

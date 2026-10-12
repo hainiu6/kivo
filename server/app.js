@@ -16,6 +16,7 @@ import { verifyIdentity } from './identity.js';
 import { registerHistoryRoutes } from './history.js';
 import { visitorIP } from './ip.js';
 import { registerStatsRoutes } from './stats.js';
+import { registerAnalyticsRoutes } from './analytics.js';
 
 const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -83,6 +84,7 @@ export function createKivo(options = {}) {
   const trustProxy = Number(options.trustProxy ?? process.env.TRUST_PROXY ?? 0);
   if (![0, 1].includes(trustProxy)) throw new Error('TRUST_PROXY must be 0 or 1.');
   app.set('trust proxy', trustProxy);
+  app.use('/api/analytics/collect', express.json({ limit: '8kb' }));
   app.use(express.json({ limit: '256kb' }));
   const server = createServer(app);
   const siteById = id => db.prepare('SELECT * FROM sites WHERE id=?').get(id);
@@ -230,6 +232,7 @@ export function createKivo(options = {}) {
   app.use('/api/admin', adminOnly);
   registerStatsRoutes(app, { db, visitors });
   app.use('/api/admin', (req, res, next) => ['GET', 'HEAD'].includes(req.method) ? next() : sameOrigin(req, res, next));
+  registerAnalyticsRoutes(app, { db, ipOf, regionOf });
   app.post('/api/admin/avatar', imageLimiter, imageBody, upload('avatar'));
   app.post('/api/admin/conversations/:id/images', (req, res, next) => {
     if (!uuid(req.params.id) || !conversation(req.params.id)) return res.status(404).json({ error: '会话不存在' });
