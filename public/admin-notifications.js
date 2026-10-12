@@ -31,13 +31,13 @@
         try {
           const start = audio.currentTime;
           const oscillator = audio.createOscillator(), gain = audio.createGain();
-          oscillator.type = 'sine'; oscillator.frequency.value = 1320;
+          oscillator.type = 'triangle'; oscillator.frequency.value = 1174.66;
           gain.gain.setValueAtTime(0, start);
-          gain.gain.linearRampToValueAtTime(0.28, start + 0.015);
-          gain.gain.exponentialRampToValueAtTime(0.001, start + 0.45);
+          gain.gain.linearRampToValueAtTime(0.72, start + 0.01);
+          gain.gain.exponentialRampToValueAtTime(0.001, start + 0.65);
           oscillator.connect(gain); gain.connect(audio.destination);
           oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
-          oscillator.start(start); oscillator.stop(start + 0.46);
+          oscillator.start(start); oscillator.stop(start + 0.66);
         } catch { renderSound(); }
       }
       async function unlock(preview = false) {

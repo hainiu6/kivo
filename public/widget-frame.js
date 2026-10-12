@@ -10,6 +10,12 @@ const authHeaders = () => ({Authorization:`Bearer ${visitorToken}`,'X-Kivo-Site'
 const composer = KivoChat.composer({form:$('message-form'),input:$('message-input'),tools:$('chat-tools'),preview:$('attachment-preview'),dropTarget:document.body,getContext:()=>socket?.connected&&!sending?siteId:'',uploadUrl:()=>'/api/widget/images',headers:authHeaders,onError:error,onSubmitLock:locked=>$('send').disabled=locked||sending||!socket?.connected});
 function tell(type) { parent.postMessage({ kivo:true,type }, parentOrigin || '*'); }
 function error(message) { $('error').textContent=message; $('error').hidden=!message; }
+function setAgentStatus(state, label, hint='') {
+  $('agent-status').dataset.state=state;
+  $('agent-status').textContent=label;
+  $('agent-status-hint').textContent=hint;
+  $('agent-status-hint').hidden=!hint;
+}
 function render() {
   const nearBottom=$('messages').scrollHeight-$('messages').scrollTop-$('messages').clientHeight<80;
   $('message-items').replaceChildren();
@@ -25,7 +31,7 @@ function render() {
 function add(m) { if(!visibleMessage(m)||rows.some(r=>r.id===m.id))return;rows.push(m);rows.sort((a,b)=>a.id-b.id);render();if(m.sender!=='visitor'&&!opened)tell('unread'); }
 function reset() {
   generation++;socket?.removeAllListeners();socket?.disconnect();socket=null;initialized=false;sending=false;rows=[];visitorToken=undefined;conversationId=null;hasIdentity=false;
-  deletedMessageIds=new Set();clearedThroughId=0;composer.clear();composer.closePicker();KivoChat.clearImages();$('message-items').replaceChildren();$('message-input').value='';$('message-input').disabled=true;$('send').disabled=true;$('restart-conversation').hidden=true;error('');
+  deletedMessageIds=new Set();clearedThroughId=0;composer.clear();composer.closePicker();KivoChat.clearImages();$('message-items').replaceChildren();$('message-input').value='';$('message-input').disabled=true;$('send').disabled=true;$('restart-conversation').hidden=true;setAgentStatus('connecting','正在连接…');error('');
 }
 function initialize(data, origin) {
   if(data.site?.id!==siteId||origin!==data.parentOrigin)return;
@@ -41,14 +47,14 @@ function initialize(data, origin) {
   document.documentElement.style.setProperty('--accent',data.site.color);document.documentElement.style.setProperty('--accent-ink',KivoChat.contrast(data.site.color));$('site-name').textContent=supportName;$('support-avatar').src=avatarUrl;$('greeting').textContent=data.site.greeting;
   socket=io({auth:{role:'visitor',siteId,visitorToken:data.visitorToken},reconnection:true});
   socket.on('connect',()=>{$('message-input').disabled=false;$('send').disabled=sending||composer.isUploading();error('');socket.emit('visitor:page',{page:currentPage});});
-  socket.on('disconnect',reason=>{if(hasIdentity&&reason==='io server disconnect')tell('identity-expired');$('agent-status').textContent='连接已断开，正在重连…';$('send').disabled=true;});
-  socket.on('connect_error',()=>{if(hasIdentity)tell('identity-expired');$('agent-status').textContent='暂时无法连接';error('连接暂时不可用，正在自动重试。');$('send').disabled=true;});
-  socket.on('agents:status',data=>$('agent-status').textContent=data.online?'● 客服在线，随时为你服务':'○ 客服暂时离线，请留言，我们会尽快回复');
+  socket.on('disconnect',reason=>{if(hasIdentity&&reason==='io server disconnect')tell('identity-expired');setAgentStatus('connecting','正在重新连接…');$('send').disabled=true;});
+  socket.on('connect_error',()=>{if(hasIdentity)tell('identity-expired');setAgentStatus('error','暂时无法连接');error('连接暂时不可用，正在自动重试。');$('send').disabled=true;});
+  socket.on('agents:status',data=>setAgentStatus(data.online?'online':'offline',data.online?'客服在线':'客服离线',data.online?'随时为你服务':'请留言，我们会尽快回复'));
   socket.on('history',messages=>{rows=messages.filter(visibleMessage);render();$('messages').scrollTop=$('messages').scrollHeight;});
   socket.on('message:new',add);
   socket.on('message:deleted',data=>{if(data.conversationId!==conversationId)return;deletedMessageIds.add(data.messageId);rows=rows.filter(visibleMessage);KivoChat.forgetImages(data.mediaIds);render();});
   socket.on('history:cleared',data=>{if(data.conversationId!==conversationId)return;clearedThroughId=Math.max(clearedThroughId,data.throughId);rows=rows.filter(visibleMessage);composer.clear();KivoChat.clearImages();$('message-input').value='';render();});
-  socket.on('conversation:deleted',data=>{if(data.conversationId!==conversationId)return;reset();$('agent-status').textContent='对话记录已删除';error('客服已删除这段会话记录。你可以开始新对话。');$('restart-conversation').hidden=false;tell('conversation-deleted');});
+  socket.on('conversation:deleted',data=>{if(data.conversationId!==conversationId)return;reset();setAgentStatus('deleted','对话记录已删除');error('客服已删除这段会话记录。你可以开始新对话。');$('restart-conversation').hidden=false;tell('conversation-deleted');});
 }
 window.addEventListener('message',event=>{
   if(event.source!==parent||!event.data?.kivo)return;
@@ -59,7 +65,7 @@ window.addEventListener('message',event=>{
   if(event.data.type==='visibility'){opened=!!event.data.opened;if(opened){$('messages').scrollTop=$('messages').scrollHeight;if(event.data.focus!==false)$('message-input').focus();}}
 });
 $('close').onclick=()=>tell('close');document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!e.defaultPrevented&&!document.querySelector('dialog[open]'))tell('close');});
-$('restart-conversation').onclick=()=>{$('restart-conversation').hidden=true;$('agent-status').textContent='正在连接…';error('');tell('restart-conversation');};
+$('restart-conversation').onclick=()=>{$('restart-conversation').hidden=true;setAgentStatus('connecting','正在连接…');error('');tell('restart-conversation');};
 $('message-input').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();$('message-form').requestSubmit();}};
 $('message-form').onsubmit=e=>{
   e.preventDefault();if(sending||composer.isUploading())return;const body=$('message-input').value.trim();if(!body&&!composer.hasAttachment())return;

@@ -5,12 +5,20 @@ import vm from 'node:vm';
 
 test('widget removes deleted history and images, rejects late replies, and waits for visitor action after conversation deletion',()=>{
   const nodes=new Map(),listeners={},parentMessages=[],socketListeners={};let acknowledge,closed=0,cleared=0,forgotten=[],focused=0;
-  const node=()=>({children:[],textContent:'',value:'',hidden:false,disabled:false,scrollHeight:100,scrollTop:0,clientHeight:100,classList:{add(){}},append(...children){this.children.push(...children);},replaceChildren(...children){this.children=children;},focus(){focused++;},requestSubmit(){}});
+  const node=()=>({children:[],dataset:{},textContent:'',value:'',hidden:false,disabled:false,scrollHeight:100,scrollTop:0,clientHeight:100,classList:{add(){}},append(...children){this.children.push(...children);},replaceChildren(...children){this.children=children;},focus(){focused++;},requestSubmit(){}});
   const get=id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);};
   const socket={connected:true,auth:{},on(name,handler){socketListeners[name]=handler;},removeAllListeners(){for(const key of Object.keys(socketListeners))delete socketListeners[key];},disconnect(){this.connected=false;closed++;},emit(){},timeout(){return{emit(name,data,callback){acknowledge=callback;}};}};
   const parent={postMessage:data=>parentMessages.push(data)};
   vm.runInNewContext(readFileSync(new URL('../public/widget-frame.js',import.meta.url),'utf8'),{URL,URLSearchParams,Date,parent,location:{search:'?site=site-1'},window:{addEventListener:(name,handler)=>{listeners[name]=handler;},kivoMessageId:()=> 'message-1'},document:{getElementById:get,createElement:node,body:node(),documentElement:{style:{setProperty(){}}},addEventListener(){},querySelector(){return null;}},io:()=>socket,KivoChat:{composer:()=>({clear(){},closePicker(){},isUploading:()=>false,hasAttachment:()=>false,payload:()=>({kind:'text'})}),clearImages:()=>{cleared++;},forgetImages:ids=>{forgotten.push(...ids);},contrast:()=> '#fff',renderMessage:m=>({body:m.body})}});
   listeners.message({source:parent,origin:'https://shop.example',data:{kivo:true,type:'init',site:{id:'site-1',color:'#0f766e',greeting:'hello'},parentOrigin:'https://shop.example',page:'https://shop.example/account',visitorToken:'token',conversationId:'conversation-1'}});
+  socketListeners.connect();
+  socketListeners['agents:status']({online:false});
+  assert.equal(get('agent-status').dataset.state,'offline');assert.equal(get('agent-status').textContent,'客服离线');
+  assert.equal(get('agent-status-hint').hidden,false);assert.match(get('agent-status-hint').textContent,/请留言/);assert.equal(get('message-input').disabled,false,'offline service still accepts messages');
+  socketListeners['agents:status']({online:true});assert.equal(get('agent-status').dataset.state,'online');
+  socketListeners.disconnect('transport close');assert.equal(get('agent-status').dataset.state,'connecting');assert.equal(get('agent-status-hint').hidden,true,'network loss clears the previous availability label');
+  socketListeners.connect_error();assert.equal(get('agent-status').dataset.state,'error');
+  socketListeners.connect();socketListeners['agents:status']({online:false});
   const one={id:1,sender:'visitor',created_at:1,body:'delete me'},two={id:2,sender:'agent',created_at:2,body:'keep me'};
   socketListeners.history([one,two]);assert.equal(get('message-items').children.length,2);
   assert.equal(parentMessages.filter(m=>m.type==='unread').length,0,'loading old agent messages does not reopen the chat');

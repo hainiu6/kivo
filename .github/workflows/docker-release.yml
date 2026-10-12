@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag (e.g. v1.9.0); must be new'
+        description: 'Release tag (e.g. v1.9.1); must be new'
         required: true
-        default: v1.9.0
+        default: v1.9.1
   push:
     tags: ['v*']
 permissions:
@@ -65,5 +65,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '新增独立访问统计模块：添加统计站点只填写名称，不限制接入域名；后台生成 analytics.js 嵌入代码，可用于任意 HTTP / HTTPS 网站。与客服 widget.js 可以同时使用。' '展示 PV、UV、独立 IP、访问页面数、每日趋势、站点概览、页面排行、访客 IP / 地区 / 访问次数 / 设备明细、域名及来源分布。页面和访客每页 50 条可翻页，总量不受列表限制。' '按北京时间统计今天、最近 7 / 30 / 90 天；期间 UV 按浏览器标识去重，日 UV 不简单相加；第一方存储按域名及站点隔离。重复上报去重，单页路由及返回恢复计入 PV。页面汇总剔除查询参数和普通锚点。' '统计站点、访问数据随现有数据库备份和升级保留；页面、时间、站点及明细标签刷新后恢复。详见 docs/traffic-analytics.md。' '通过 44 项测试，覆盖跨域采集、PV / UV 去重、真实 IP、权限、北京时间零点、超过 200 条记录的分页、重启保留、脚本重试和页面恢复。双架构容器及 Debian 10 安装升级检查包含统计记录保留验证。浏览器实测多域名接入、刷新 PV、UV 去重及界面恢复。' '执行 bash /opt/kivo/scripts/upgrade.sh 后强制刷新后台，再从访问统计页复制 JS 放入网站模板即可开始采集。' > release-notes.md
+          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '访客聊天窗新增醒目的客服状态标签：绿色客服在线、橙色客服离线，离线时另行显示留言说明。网络断开和重连使用独立状态，避免误判客服是否在线。' '去掉用户端和后台的 Enter / Shift + Enter 提示文字，原有发送和换行操作继续可用。' '提示音换为更清晰、响亮的一声叮，提高音量并延长衰减；保持静音偏好、点击启用、试听、连续消息合并及重复消息去重。' '通过 44 项测试及浏览器状态切换、离线留言、键盘发送和换行检查。双架构容器与 Debian 10 安装升级测试验证数据保留。' '执行 bash /opt/kivo/scripts/upgrade.sh 后强制刷新后台及接入网站。' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md
