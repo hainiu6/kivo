@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-test('five distinct notification WAVs match browser previews, have stronger average loudness and do not clip', () => {
+test('six distinct notification WAVs match browser previews, have stronger average loudness and do not clip', () => {
   const context = { window: {} };
   vm.runInNewContext(readFileSync(new URL('../public/notification-sounds.js', import.meta.url), 'utf8'), context);
   const { sounds, synthesize } = context.window.KivoNotificationSounds;
-  assert.equal(sounds.length, 5); assert.equal(new Set(sounds.map(s => s.id)).size, 5);
+  assert.equal(sounds.length, 6); assert.equal(new Set(sounds.map(s => s.id)).size, 6);
   for (const sound of sounds) {
     const samples = synthesize(sound.id, 44100), wav = readFileSync(new URL(`../public/sounds/${sound.id}.wav`, import.meta.url));
     assert.equal(wav.toString('ascii', 0, 4), 'RIFF'); assert.equal(wav.readUInt32LE(24), 44100);

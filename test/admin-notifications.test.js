@@ -68,11 +68,11 @@ test('muted preference persists and blocked audio leaves an actionable enable bu
   h.notifications.receive({ id: 1, sender: 'visitor' }); assert.equal(h.tones, 0); assert.equal(h.counts.at(-1), 1);
 });
 
-test('all five choices preview at the same level as notifications, persist and preserve the mute preference', async () => {
-  const h = harness({ muted: true, savedSound: 'doorbell' }); h.notifications.start();
-  assert.equal(h.soundSelect.value, 'doorbell');
+test('all six choices preview at the same level as notifications, persist and preserve the mute preference', async () => {
+  const h = harness({ muted: true, savedSound: 'wechat' }); h.notifications.start();
+  assert.equal(h.soundSelect.value, 'wechat');
   const lengths = new Set();
-  for (const id of ['bright','double','rise','call','doorbell']) {
+  for (const id of ['bright','double','rise','call','doorbell','wechat']) {
     h.soundSelect.value = id; h.soundSelect.onchange();
     assert.equal(h.stored.get('kivo.admin.sound.selection'), id);
     h.previewButton.onclick(); await h.tick();
@@ -80,15 +80,15 @@ test('all five choices preview at the same level as notifications, persist and p
     assert.match(h.previewStatus.textContent, /消息提示仍为静音/);
     assert.equal(h.counts.length, 0, 'previews do not change unread counts');
   }
-  assert.equal(lengths.size, 5, 'each choice uses its own waveform');
+  assert.equal(lengths.size, 6, 'each choice uses its own waveform');
   assert.equal(h.stored.get('kivo.admin.sound'), 'off');
-  h.notifications.receive({ id: 1, sender: 'visitor' }); assert.equal(h.tones, 5, 'preview never unmutes incoming alerts');
+  h.notifications.receive({ id: 1, sender: 'visitor' }); assert.equal(h.tones, 6, 'preview never unmutes incoming alerts');
   h.button.onclick(); await h.tick(); const preview = h.context.played.at(-1);
   h.notifications.receive({ id: 2, sender: 'visitor' });
   assert.equal(h.context.played.at(-1), preview, 'incoming alert reuses the selected preview buffer');
-  const restored = harness({ savedSound: h.stored.get('kivo.admin.sound.selection') }); assert.equal(restored.soundSelect.value, 'doorbell');
+  const restored = harness({ savedSound: h.stored.get('kivo.admin.sound.selection') }); assert.equal(restored.soundSelect.value, 'wechat');
   const fallback = harness({ savedSound: 'invalid' }); assert.equal(fallback.soundSelect.value, 'bright');
-  h.soundSelect.value = 'invalid'; h.soundSelect.onchange(); assert.equal(h.soundSelect.value, 'doorbell');
+  h.soundSelect.value = 'invalid'; h.soundSelect.onchange(); assert.equal(h.soundSelect.value, 'wechat');
 });
 
 test('a blocked preview is actionable and logout cancels an in-flight audio unlock', async () => {
