@@ -7,10 +7,24 @@
   window.__kivoWidget = true;
   const service = new URL(script.src).origin;
   const visitorName = (script.getAttribute('data-visitor-name') || '').trim().slice(0,128).replace(/[\uD800-\uDBFF]$/,'');
-  const key = `kivo:${service}:${siteId}${visitorName ? ':name:' + JSON.stringify(visitorName) : ''}`;
+  const key = `kivo:${service}:${siteId}`;
+  const legacyKey = visitorName ? key + ':name:' + JSON.stringify(visitorName) : key;
   const identityPath = script.getAttribute('data-identity-url');
   let anonymousToken;
-  try { anonymousToken = localStorage.getItem(key); } catch { /* storage may be blocked */ }
+  try { anonymousToken = localStorage.getItem(key) || localStorage.getItem(legacyKey); } catch { /* storage may be blocked */ }
+  async function browserCredential() {
+    const load = () => {
+      try { anonymousToken = localStorage.getItem(key) || anonymousToken; } catch { /* storage may be blocked */ }
+      if (!anonymousToken && typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        anonymousToken = [...crypto.getRandomValues(new Uint8Array(32))].map(n => n.toString(16).padStart(2,'0')).join('');
+      }
+      if (anonymousToken) try { localStorage.setItem(key, anonymousToken); } catch { /* in-memory credential still works */ }
+      return anonymousToken;
+    };
+    // Serialize the first creation across simultaneous tabs on this website.
+    if (typeof navigator !== 'undefined' && navigator.locks?.request) return navigator.locks.request(key, load);
+    return load();
+  }
   const host = document.createElement('div');
   host.id = 'kivo-support';
   const shadow = host.attachShadow({ mode: 'open' });
@@ -26,7 +40,7 @@
   shadow.append(style, panel, error, launcher);
   let session, ready = false, opened = false, booting = false, deletedConversation = false, bootstrapRevision = 0, lastPage = location.href;
   function tell(type, data = {}) { frame.contentWindow?.postMessage({ kivo:true, type, ...data }, service); }
-  function initialize() { if (ready && session) tell('init', { ...session, page:location.href, parentOrigin:location.origin, opened }); }
+  function initialize() { if (ready && session) tell('init', { ...session, page:location.href, parentOrigin:location.origin, opened, pageVisible:!document.hidden }); }
   async function bootstrap(reset = false) {
     if (deletedConversation) return;
     if (booting && !reset) return;
@@ -45,6 +59,8 @@
         if (!result || !(result.identityToken === null || typeof result.identityToken === 'string' && result.identityToken.length > 0)) throw new Error('网站用户身份接口返回格式无效');
         identityToken = result.identityToken;
       }
+      if (revision !== bootstrapRevision) return;
+      if (!identityToken) await browserCredential();
       if (revision !== bootstrapRevision) return;
       const res = await fetch(`${service}/api/widget/session`, {method:'POST',headers:{'Content-Type':'application/json'},credentials:'omit',body:JSON.stringify({siteId,visitorToken:identityToken ? undefined : anonymousToken,identityToken,visitorName,page:location.href})});
       const data = await res.json();
@@ -80,6 +96,7 @@
   window.addEventListener('keydown', e => { if (e.key === 'Escape' && opened) setOpen(false); });
   const mount = () => { document.body.append(host);bootstrap(); };
   if (document.body) mount(); else document.addEventListener('DOMContentLoaded', mount, { once:true });
+  document.addEventListener('visibilitychange',()=>tell('page-visibility',{visible:!document.hidden}));
   if (identityPath) {
     setInterval(()=>bootstrap(),60000);
     document.addEventListener('visibilitychange',()=>{if(!document.hidden)bootstrap();});

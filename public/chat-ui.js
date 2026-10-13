@@ -2,6 +2,16 @@
 (function () {
   const images = new Map();
   const el = (tag, cls, text) => { const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n; };
+  function reconcileMessages(container, rows, create, update = () => {}) {
+    const existing = new Map([...container.children].filter(n=>n.dataset?.messageId).map(n=>[Number(n.dataset.messageId),n]));
+    const ids = new Set(rows.map(m=>m.id));
+    for (const node of [...container.children]) if (!ids.has(Number(node.dataset?.messageId))) node.remove();
+    rows.forEach((message,index)=>{
+      const node = existing.get(message.id) || create(message);
+      node.dataset.messageId = String(message.id); update(node,message);
+      if (container.children[index] !== node) container.insertBefore(node,container.children[index] || null);
+    });
+  }
   function forgetImages(ids=[]) {
     for(const id of ids){const entry=images.get(id);images.delete(id);entry?.then(url=>{document.querySelectorAll?.('.image-viewer').forEach(dialog=>{if(dialog.querySelector('img')?.src===url)dialog.close();});URL.revokeObjectURL(url);}).catch(()=>{});}
   }
@@ -123,5 +133,5 @@
     return { clear, payload:()=>attachment?{kind:attachment.kind,...(attachment.mediaId?{mediaId:attachment.mediaId}:{stickerId:attachment.stickerId})}:{kind:'text'}, hasAttachment:()=>!!attachment, isUploading:()=>uploading, closePicker:()=>toggle(false), destroy:()=>{clear();clearDrag();toggle(false);} };
   }
   const contrast = color => {const rgb=color.replace('#','').match(/../g)?.map(v=>parseInt(v,16))||[0,0,0];return rgb[0]*.299+rgb[1]*.587+rgb[2]*.114>155?'#233238':'#fff';};
-  window.KivoChat = { composer,renderMessage,clearImages,forgetImages,contrast,uploadImage };
+  window.KivoChat = { composer,renderMessage,reconcileMessages,clearImages,forgetImages,contrast,uploadImage };
 })();

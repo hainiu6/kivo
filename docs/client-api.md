@@ -120,6 +120,7 @@ IP 和地区从客户端当前连接识别，不接受 JSON 中自报的 IP。�
 | `POST /messages` | 发送文字、图片或动态表情 |
 | `POST /images` | 上传图片 |
 | `GET /images/{mediaId}` | 获取自己会话中的图片 |
+| `POST /read` | 用户看到消息后上报已读，正文 `{"lastId":123}`，仅可使用自己会话中实际存在的消息 ID |
 | `POST /context` | 更新当前客户端页面，正文 `{"screen":"套餐详情"}` |
 
 历史响应：
@@ -128,7 +129,7 @@ IP 和地区从客户端当前连接识别，不接受 JSON 中自报的 IP。�
 {"conversationId":"会话UUID","messages":[],"hasMore":false,"nextBefore":null}
 ```
 
-有更早历史时使用 `nextBefore` 继续请求。消息字段为 `id`、`conversation_id`、`sender`（`visitor` / `agent` / `auto`）、`body`、`kind`、`client_id`、`created_at`（Unix 毫秒）、`media_id`、`sticker_id`。用户资料不混入聊天正文。
+有更早历史时使用 `nextBefore` 继续请求。消息字段为 `id`、`conversation_id`、`sender`（`visitor` / `agent` / `auto`）、`body`、`kind`、`client_id`、`created_at`（Unix 毫秒）、`media_id`、`sticker_id`、`read_at`（用户首次查看时间，Unix 毫秒；未读为 null）。用户资料不混入聊天正文。
 
 发送文字：
 
@@ -192,8 +193,12 @@ socket.connect();
 | `conversation:deleted` | 服务端 → 客户端，清空记录并停止自动创建，等待用户主动开始新会话 |
 | `message:send` | 客户端 → 服务端，参数与 POST /messages 相同，ack 为 `{"ok":true,"message":{...}}` 或 `{"ok":false,"error":"..."}` |
 | `visitor:identity` | 客户端 → 服务端，刷新凭证，正文 `{"visitorToken":"新凭证"}`，仅允许同一会话，ack 为 `{"ok":true}` |
+| `visitor:read` | 客户端 → 服务端，`{"lastId":123}`；实际看到客服消息时发送，ack 为 `{ok:true}` 或 `{ok:false,error}` |
+| `message:read` | 服务端 → 后台 / 客户端，`conversationId`、`throughId`、`readAt`；标记对应会话 ID ≤ throughId 的客服 / 自动回复为已读 |
 
 获取新凭证并重新调用 `/sessions` 后，先设置 `socket.auth.visitorToken`，已连接时发 `visitor:identity`，未连接时使用新 auth 重连。服务端凭证过期会断开连接；不要无限重试旧凭证。退出时调用 DELETE /session，关闭 Socket 并清空本地缓存。
+
+不要在下载历史或后台接收消息时自动标为已读。仅在会话窗打开、应用在前台且对应消息可见时调用 `/read` 或 `visitor:read`。客服后台将显示「未读 / 已读」。
 
 断网重连后会收到最近历史；客户端应重新核对之前已加载的历史分页，清除离线期间后台删除的记录，不要只追加新消息。移动应用回到前台时检查凭证与重连状态。
 

@@ -3,7 +3,7 @@ const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 let socket, publicUrl, sites = [], conversations = [], activeId = null, activeMessages = [], status = 'open', view = 'inbox', selectionRevision = 0, listRevision = 0;
 let loadingMessages = false, sending = false, toastTimer;
-let pendingMessages = [];
+let pendingMessages = [], pendingReceipts = [];
 let authenticated=false, accountUsername='', starting=false;
 let supportAvailability='online', presenceRevision=0, presenceSaving=false;
 function renderAvailability() {
@@ -124,6 +124,12 @@ async function start() {
     }
   });
   socket.on('replies:update', rows => { replies = rows; renderQuickReplies(); });
+  socket.on('message:read', data => {
+    if(data.conversationId!==activeId)return;
+    if(loadingMessages)pendingReceipts.push(data);
+    for(const m of [...activeMessages,...pendingMessages])if(m.sender!=='visitor'&&m.id<=data.throughId)m.read_at=m.read_at||data.readAt;
+    renderMessages();
+  });
   socket.on('message:deleted', applyMessageDeletion);
   socket.on('history:cleared', applyHistoryClear);
   socket.on('conversation:deleted', applyConversationDeletion);
@@ -179,7 +185,7 @@ async function loadConversations() {
   notifications.refresh();
 }
 function renderConversations() {
-  conversations.sort((a,b) => b.updated_at-a.updated_at); conversations=conversations.slice(0,200);
+  conversations.sort((a,b) => Number(!!b.online)-Number(!!a.online) || b.updated_at-a.updated_at || b.id.localeCompare(a.id)); conversations=conversations.slice(0,200);
   $('#list-count').textContent = conversations.length;
   const list = $('#conversations'); list.replaceChildren();
   if (!conversations.length) { list.append(element('div','list-empty',sites.length ? '暂无匹配会话。\n访客打开接入的网站后，会出现在这里。' : '还没有接入网站。\n点击「网站接入」开始设置。')); return; }
@@ -219,29 +225,47 @@ function renderDetails(c) {
   $('#close-conversation').textContent=c.status==='closed'?'重新打开':'结束会话';$('#close-conversation').dataset.status=c.status;
 }
 async function selectConversation(id,focus=false) {
+  const same=activeId===id&&$('#message-items').children.length>0;
+  if(same&&focus&&!loadingMessages){$('#message-input').focus({preventScroll:true});markRead();return;}
   if (activeId) drafts.set(activeId,$('#message-input').value);
-  if(activeId!==id){composer.clear();composer.closePicker();KivoChat.clearImages();clearedThroughId=0;deletedMessageIds=new Set();}
-  activeId=id;const revision=++selectionRevision;loadingMessages=true;pendingMessages=[];
+  if(activeId!==id){composer.clear();composer.closePicker();KivoChat.clearImages();clearedThroughId=0;deletedMessageIds=new Set();activeMessages=[];}
+  const panel=$('#messages'),scroll=panel.scrollTop,bottom=panel.scrollHeight-panel.scrollTop-panel.clientHeight<100;
+  const oldest=same?activeMessages[0]?.id:null;
+  activeId=id;const revision=++selectionRevision;loadingMessages=true;pendingMessages=[];pendingReceipts=[];
   renderConversations();const c=conversations.find(c=>c.id===id);if(c)renderDetails(c);
-  $('.inbox-grid').classList.add('chat-selected');$('#message-items').replaceChildren(element('div','muted','正在加载对话…'));
-  $('#message-input').value=drafts.get(id)||'';$('#send-error').textContent='';$('#send-message').disabled=true;
+  $('.inbox-grid').classList.add('chat-selected');if(!same)$('#message-items').replaceChildren(element('div','muted','正在加载对话…'));
+  if(!same)$('#message-input').value=drafts.get(id)||'';$('#send-error').textContent='';$('#send-message').disabled=true;
   if(focus&&c&&view==='inbox')$('#message-input').focus({preventScroll:true});
   rememberWorkspace();
   try {
     const [rows,detail]=await Promise.all([api(`/api/admin/conversations/${id}/messages`),c?Promise.resolve(c):api(`/api/admin/conversations/${id}`)]);
+    let page=rows;
+    while(oldest&&page.length===100&&page[0].id>oldest&&revision===selectionRevision){
+      page=await api(`/api/admin/conversations/${id}/messages?before=${page[0].id}`);rows.unshift(...page);
+    }
     if(revision!==selectionRevision)return;
     renderDetails(detail);
     if(focus&&!c&&view==='inbox')$('#message-input').focus({preventScroll:true});
-    activeMessages=[...new Map([...rows,...pendingMessages].filter(visibleMessage).map(m=>[m.id,m])).values()].sort((a,b)=>a.id-b.id);pendingMessages=[];renderMessages();$('#messages').scrollTop=$('#messages').scrollHeight;$('#older-messages').hidden=rows.length<100||!activeMessages.length;
-    loadingMessages=false;$('#send-message').disabled=!socket?.connected;markRead();
-  } catch(e) { if(revision===selectionRevision){loadingMessages=false;if(e.status===404)applyConversationDeletion({conversationId:id});else $('#message-items').replaceChildren(element('p','error',e.message));} throw e; }
+    const reads=new Map(activeMessages.map(m=>[m.id,m.read_at]));
+    activeMessages=[...new Map([...rows,...pendingMessages].filter(visibleMessage).map(m=>[m.id,{...m,read_at:m.read_at||reads.get(m.id)||null}])).values()].sort((a,b)=>a.id-b.id);pendingMessages=[];
+    for(const receipt of pendingReceipts)for(const m of activeMessages)if(m.sender!=='visitor'&&m.id<=receipt.throughId)m.read_at=m.read_at||receipt.readAt;
+    pendingReceipts=[];renderMessages();
+    panel.scrollTop=!same||bottom?panel.scrollHeight:scroll;$('#older-messages').hidden=page.length<100||!activeMessages.length;
+    loadingMessages=false;$('#send-message').disabled=!socket?.connected||composer.isUploading();markRead();
+  } catch(e) { if(revision===selectionRevision){loadingMessages=false;$('#send-message').disabled=!socket?.connected;if(e.status===404)applyConversationDeletion({conversationId:id});else if(!same)$('#message-items').replaceChildren(element('p','error',e.message));} throw e; }
 }
 function renderMessages() {
-  const container=$('#message-items');container.replaceChildren();
-  if(!activeMessages.length)container.append(element('p','muted','访客还没有发送消息。用一句问候开始对话吧。'));
-  activeMessages.forEach(m=>{
-    const row=element('div',`message-row ${m.sender}`),meta=element('div','message-meta',`${m.sender==='auto'?'自动回复':m.sender==='agent'?'客服':'访客'} · ${date(m.created_at)}`),remove=element('button','message-delete','删除');remove.type='button';remove.setAttribute('aria-label',`删除消息 ${m.id}`);remove.onclick=()=>openDelete({kind:'message',url:`/api/admin/conversations/${activeId}/messages/${m.id}`,summary:`删除这条${m.kind==='image'?'图片':m.kind==='sticker'?'表情':'消息'}：${m.body?.slice(0,80)||'（无文字）'}`});meta.append(remove);row.append(meta,KivoChat.renderMessage(m,{onImageLoad:()=>{const panel=$('#messages');if(panel.scrollHeight-panel.scrollTop-panel.clientHeight<260)panel.scrollTop=panel.scrollHeight;}}));container.append(row);
+  const container=$('#message-items');
+  if(!activeMessages.length){if(container.children.length!==1||container.firstChild.dataset?.empty!=='true'){const empty=element('p','muted','访客还没有发送消息。用一句问候开始对话吧。');empty.dataset.empty='true';container.replaceChildren(empty);}return;}
+  KivoChat.reconcileMessages(container,activeMessages,m=>{
+    const row=element('div',`message-row ${m.sender}`),meta=element('div','message-meta',`${m.sender==='auto'?'自动回复':m.sender==='agent'?'客服':'访客'} · ${date(m.created_at)}`),remove=element('button','message-delete','删除');
+    if(m.sender!=='visitor')meta.append(element('span','message-receipt','未读'));
+    remove.type='button';remove.setAttribute('aria-label',`删除消息 ${m.id}`);const id=activeId;remove.onclick=()=>openDelete({kind:'message',url:`/api/admin/conversations/${id}/messages/${m.id}`,summary:`删除这条${m.kind==='image'?'图片':m.kind==='sticker'?'表情':'消息'}：${m.body?.slice(0,80)||'（无文字）'}`});meta.append(remove);row.append(meta,KivoChat.renderMessage(m,{onImageLoad:()=>{const panel=$('#messages');if(panel.scrollHeight-panel.scrollTop-panel.clientHeight<260)panel.scrollTop=panel.scrollHeight;}}));return row;
+  },(row,m)=>{
+    const receipt=row.querySelector('.message-receipt');if(m.sender==='visitor'||!receipt)return;
+    receipt.textContent=m.read_at?'已读':'未读';receipt.classList.toggle('is-read',!!m.read_at);receipt.title=m.read_at?'用户已查看 · '+date(m.read_at):'用户尚未查看这条消息';
   });
+  if(!activeMessages.length&&!container.children.length)container.append(element('p','muted','访客还没有发送消息。用一句问候开始对话吧。'));
 }
 function addMessage(m) {
   if(!visibleMessage(m)||activeMessages.some(item=>item.id===m.id))return;

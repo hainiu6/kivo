@@ -11,7 +11,7 @@ const platforms = new Set(['Windows', 'macOS', 'Linux', 'Android', 'iOS', 'Other
 const clean = (value, limit) => typeof value === 'string' && value.length <= limit && !/[\u0000-\u001f\u007f]/.test(value);
 
 export function registerClientRoutes(app, context) {
-  const { db, io, dataDir, publicOrigin, siteById, siteAllows, identitySecret, resolveVisitor, openSession, siteProfile, agentsOnline, saveMessage, imageLimiter, imageBody, upload, ipOf, regionOf, visitors, updateConversation, publishPresence, isKnownOrigin } = context;
+  const { db, io, dataDir, publicOrigin, siteById, siteAllows, identitySecret, resolveVisitor, openSession, siteProfile, agentsOnline, saveMessage, imageLimiter, imageBody, upload, ipOf, regionOf, visitors, updateConversation, publishPresence, isKnownOrigin, readVisitorMessages } = context;
   db.exec(`CREATE TABLE IF NOT EXISTS client_profiles(conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,info TEXT NOT NULL,attributes TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS client_revocations(token_hash TEXT PRIMARY KEY,expires INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS client_revocations_expiry ON client_revocations(expires);`);
@@ -106,6 +106,10 @@ export function registerClientRoutes(app, context) {
     const media = uuid(req.params.id) && db.prepare("SELECT id FROM media WHERE id=? AND kind='chat' AND conversation_id=?").get(req.params.id, req.clientConversation.id);
     if (!media) return res.status(404).json({ error: '图片不存在或无权访问' });
     res.type('image/webp').sendFile(path.resolve(dataDir, 'media', media.id + '.webp'));
+  });
+  app.post(prefix + '/read', limiter, authorize, (req, res) => {
+    try { res.json(readVisitorMessages(req.clientConversation.id, req.body?.lastId)); }
+    catch (error) { res.status(400).json({error:error.message}); }
   });
   app.post(prefix + '/context', limiter, authorize, (req, res) => {
     if (!clean(req.body?.screen, 128)) return res.status(400).json({ error: 'screen 须为最多 128 字符的文本' });

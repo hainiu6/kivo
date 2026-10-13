@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
 
 const source=readFileSync(new URL('../public/widget.js',import.meta.url),'utf8');
 test('new replies open the visitor panel without stealing focus, reject spoofed notifications and respect deletion',async()=>{
@@ -18,7 +19,7 @@ test('new replies open the visitor panel without stealing focus, reject spoofed 
   launcher.onclick();assert.equal(focused,1,'manual open focuses the chat');
   notify('close');notify('conversation-deleted');notify('unread');assert.equal(panel.hidden,true,'deleted conversations cannot reopen');
 });
-test('session-name embed makes no identity request and isolates browser credentials for names and logout',async()=>{
+test('session-name embed reuses one browser credential across page names and anonymous pages',async()=>{
   const storage=new Map(),requests=[];
   let counter=0;
   const element=()=>({style:{setProperty(){}},append(){},setAttribute(){},attachShadow(){return{append(){}};},contentWindow:{postMessage(){}}});
@@ -34,11 +35,11 @@ test('session-name embed makes no identity request and isolates browser credenti
     return requests.at(-1).body;
   };
   await run('');const anonymousToken=[...storage.values()][0];
-  assert.equal((await run('Alice')).visitorName,'Alice');const aliceToken=[...storage.values()][1];
-  assert.equal((await run('Bob')).visitorToken,undefined);
-  assert.equal((await run('Alice')).visitorToken,aliceToken);
+  assert.equal((await run('Alice')).visitorName,'Alice');
+  assert.equal((await run('Bob')).visitorToken,anonymousToken);
+  assert.equal((await run('Alice')).visitorToken,anonymousToken);
   assert.equal((await run('')).visitorToken,anonymousToken);
-  assert.notEqual(aliceToken,anonymousToken);
+  assert.equal(storage.size,1);
   assert.equal((await run('x'.repeat(127)+'😊')).visitorName,'x'.repeat(127),'long Unicode names do not leave a split surrogate');
 });
 
@@ -60,4 +61,19 @@ test('deleting a conversation invalidates anonymous credentials and suppresses b
     notify('restart-conversation');await new Promise(resolve=>setImmediate(resolve));assert.ok(requests.length>before);
     assert.equal(requests.at(-1).body.visitorToken,undefined,'fresh conversation does not reuse a deleted visitor credential');
   }
+});
+
+test('simultaneous first tabs create one persistent browser credential before either bootstrap response',async()=>{
+  const storage=new Map(),requests=[],pending=[];let lock=Promise.resolve();
+  const run=(name,page)=>{
+    const element=()=>({style:{setProperty(){}},append(){},setAttribute(){},attachShadow(){return{append(){}};},contentWindow:{postMessage(){}}});
+    vm.runInNewContext(source,{URL,console,crypto:webcrypto,Uint8Array,navigator:{locks:{request(_key,work){const next=lock.then(work);lock=next.catch(()=>{});return next;}}},location:{href:page,origin:'https://shop.example'},window:{addEventListener(){}},document:{currentScript:{src:'https://chat.example/widget.js',getAttribute:key=>({'data-site':'site-id','data-visitor-name':name})[key]||null},body:{append(){}},createElement:element,addEventListener(){}},setInterval(){},localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},fetch:async(_url,options)=>{requests.push(JSON.parse(options.body));return new Promise(resolve=>pending.push(resolve));}});
+  };
+  run('Alice','https://shop.example/user');run('','https://shop.example/pricing');
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(requests.length,2);
+  assert.match(requests[0].visitorToken,/^[a-f0-9]{64}$/);assert.equal(requests[0].visitorToken,requests[1].visitorToken);assert.equal(storage.size,1);
+  for(const resolve of pending)resolve({ok:true,json:async()=>({conversationId:'one-conversation',visitorToken:requests[0].visitorToken,identity:null,site:{id:'site-id',color:'#0f766e'}})});
+  await new Promise(resolve=>setImmediate(resolve));
+  run('Alice','https://shop.example/orders');await new Promise(resolve=>setImmediate(resolve));assert.equal(requests[2].visitorToken,requests[0].visitorToken);
+  pending.at(-1)({ok:true,json:async()=>({conversationId:'one-conversation',visitorToken:requests[0].visitorToken,identity:null,site:{id:'site-id',color:'#0f766e'}})});
 });

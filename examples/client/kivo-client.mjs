@@ -29,6 +29,7 @@ export class KivoClient {
   }
   async upload(formData) { return this.request('/images', { method: 'POST', body: formData, raw: true }); }
   async image(mediaId) { return this.request('/images/' + encodeURIComponent(mediaId), { raw: true }); }
+  async read(lastId) { return this.request('/read', { method: 'POST', body: { lastId } }); }
   async context(screen) { return this.request('/context', { method: 'POST', body: { screen } }); }
   socketAuth() { return { role: 'visitor', siteId: this.siteId, visitorToken: this.accessToken }; }
   async logout() {

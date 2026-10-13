@@ -36,7 +36,7 @@ test('all-websites access, saved replies, automatic replies and restart persiste
   await service.close(); await start(); cookie = await login();
   assert.equal((await request('/api/admin/sites', { cookie })).data[0].id, old);
   assert.equal((await request('/api/admin/sites', { cookie })).data[0].autoReply.firstEnabled, false);
-  assert.equal(service.db.prepare('PRAGMA user_version').get().user_version, 5);
+  assert.equal(service.db.prepare('PRAGMA user_version').get().user_version, 6);
   const phrases = [{ label: '配送时间', body: '一般在两天内发出。\n节假日顺延。' }];
   assert.equal((await request('/api/admin/replies')).res.status, 401);
   assert.equal((await request('/api/admin/replies', { method: 'PUT', cookie, body: phrases, from: external })).res.status, 403);

@@ -84,3 +84,32 @@ test('client logout revokes only its credential across restart, while account hi
   await f.request(`/api/admin/sites/${f.site.id}/identity`,{action:'rotate'},f.admin);await assert.rejects(client.history(),e=>e.status===401);
   assert.equal(f.service.db.prepare('SELECT COUNT(*) AS n FROM messages').get().n,1);
 });
+
+test('authenticated visitor read receipts are monotonic, conversation-scoped, realtime and persisted',async t=>{
+  const f=await setup(t),proof=await f.issue(),client=new KivoClient({baseUrl:f.base,siteId:f.site.id});
+  const session=await client.start(proof.token,{platform:'Android'}),visitor=await f.connect(client.socketAuth()),agent=await f.connect({role:'admin'},f.admin);
+  const reply=body=>new Promise(resolve=>agent.emit('message:send',{conversationId:session.conversationId,body,clientId:randomUUID()},resolve));
+  const first=(await reply('第一条回复')).message,second=(await reply('第二条回复')).message;
+  assert.equal(first.read_at,null);assert.equal(second.read_at,null);
+  const auth={Authorization:'Bearer '+proof.token,'X-Kivo-Site':f.site.id};
+  assert.equal((await f.request('/api/client/v1/read',{lastId:first.id})).status,401);
+  for(const lastId of [0,-1,'1',second.id+100])assert.equal((await f.request('/api/client/v1/read',{lastId},auth)).status,400);
+  const stranger=new KivoClient({baseUrl:f.base,siteId:f.site.id}),otherProof=await f.issue({userId:'other',account:'stranger'});await stranger.start(otherProof.token,{platform:'iOS'});
+  assert.equal((await f.request('/api/client/v1/read',{lastId:first.id},{Authorization:'Bearer '+otherProof.token,'X-Kivo-Site':f.site.id})).status,400);
+  const event=once(agent,'message:read');const ack=await new Promise(resolve=>visitor.emit('visitor:read',{lastId:first.id},resolve));assert.equal(ack.ok,true);
+  const receipt=await event;assert.equal(receipt.throughId,first.id);assert.equal(receipt.conversationId,session.conversationId);
+  let rows=(await client.history()).messages;assert.equal(rows[0].read_at,receipt.readAt);assert.equal(rows[1].read_at,null,'unseen later messages stay unread');
+  assert.equal((await f.request('/api/client/v1/read',{lastId:second.id},auth)).status,200);
+  assert.equal((await f.request('/api/client/v1/read',{lastId:first.id},auth)).status,200);
+  rows=(await client.history()).messages;assert.equal(rows[0].read_at,receipt.readAt);assert.ok(rows[1].read_at);
+  await f.restart();const resumed=new KivoClient({baseUrl:f.base,siteId:f.site.id});await resumed.start(proof.token,{platform:'Android'});
+  assert.equal((await resumed.history()).messages[0].read_at,receipt.readAt);
+});
+
+test('server conversation listing promotes online visitors before the 200-row limit',async t=>{
+  const f=await setup(t),proof=await f.issue(),client=new KivoClient({baseUrl:f.base,siteId:f.site.id});const session=await client.start(proof.token,{platform:'Windows'});
+  f.service.db.prepare('UPDATE conversations SET updated_at=1 WHERE id=?').run(session.conversationId);
+  const insert=f.service.db.prepare("INSERT INTO conversations(id,site_id,visitor_hash,name,ip,region,page,status,created_at,updated_at) VALUES(?,?,?,'offline','1.1.1.1','US','https://shop.example','open',?,?)");
+  for(let i=0;i<210;i++)insert.run(randomUUID(),f.site.id,randomUUID(),Date.now(),Date.now()+i);
+  const rows=await(await f.request('/api/admin/conversations',undefined,f.admin)).json();assert.equal(rows.length,200);assert.equal(rows[0].id,session.conversationId);assert.equal(rows[0].online,true);
+});

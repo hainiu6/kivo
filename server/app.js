@@ -18,6 +18,7 @@ import { visitorIP } from './ip.js';
 import { registerStatsRoutes } from './stats.js';
 import { registerAnalyticsRoutes } from './analytics.js';
 import { registerClientRoutes } from './client-api.js';
+import { conversationLifecycle } from './conversation-lifecycle.js';
 
 const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -66,7 +67,8 @@ export function createKivo(options = {}) {
     if (!columns.has('kind')) db.exec("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'");
     if (!columns.has('media_id')) db.exec('ALTER TABLE messages ADD COLUMN media_id TEXT REFERENCES media(id)');
     if (!columns.has('sticker_id')) db.exec('ALTER TABLE messages ADD COLUMN sticker_id TEXT');
-    db.exec('PRAGMA user_version=5; COMMIT');
+    if (!columns.has('read_at')) db.exec('ALTER TABLE messages ADD COLUMN read_at INTEGER');
+    db.exec('PRAGMA user_version=6; COMMIT');
   } catch (e) { db.exec('ROLLBACK'); db.close(); throw e; }
   const defaultReplies = [{ label: '问候语', body: '你好，很高兴为你服务！' }, { label: '请稍候', body: '收到，请稍等，我帮你查看一下。' }, { label: '结束语', body: '感谢你的咨询，有其他问题随时联系我们。' }];
   const quickReplies = () => JSON.parse(db.prepare("SELECT value FROM settings WHERE key='quickReplies'").get()?.value || JSON.stringify(defaultReplies));
@@ -122,7 +124,8 @@ export function createKivo(options = {}) {
     const profile = c && db.prepare('SELECT info,attributes FROM client_profiles WHERE conversation_id=?').get(c.id);
     return c ? { ...c, client: profile ? { ...JSON.parse(profile.info), attributes: JSON.parse(profile.attributes) } : null, region: regionOf(c.ip), visitor_hash: undefined, online: (visitors.get(id)?.size || 0) > 0 } : null;
   };
-  const updateConversation = id => io.to('admins').emit('conversation:update', conversation(id));
+  const updateConversation = id => { lifecycle.sync(id); io.to('admins').emit('conversation:update', conversation(id)); };
+  const lifecycle = conversationLifecycle({ db, visitors, updateConversation, clock: options.lifecycleClock });
   const messages = (id, before) => {
     const limit = before && Number.isSafeInteger(Number(before)) ? Number(before) : Number.MAX_SAFE_INTEGER;
     return db.prepare('SELECT * FROM messages WHERE conversation_id=? AND id<? ORDER BY id DESC LIMIT 100').all(id, limit).reverse();
@@ -147,6 +150,13 @@ export function createKivo(options = {}) {
     updateConversation(id);
     if (sender === 'visitor') sendAutoReply(id);
     return message;
+  }
+  function readVisitorMessages(id, lastId) {
+    if (!Number.isSafeInteger(lastId) || lastId <= 0 || !db.prepare('SELECT id FROM messages WHERE conversation_id=? AND id=?').get(id,lastId)) throw new Error('消息编号无效或不属于此会话');
+    const time = now();
+    const changed = db.prepare("UPDATE messages SET read_at=? WHERE conversation_id=? AND sender IN ('agent','auto') AND id<=? AND read_at IS NULL").run(time,id,lastId).changes;
+    if (changed) io.to('admins').to(`conversation:${id}`).emit('message:read', { conversationId:id, throughId:lastId, readAt:time });
+    return { ok:true };
   }
   function sendAutoReply(id) {
     const c = db.prepare('SELECT site_id FROM conversations WHERE id=?').get(id);
@@ -331,7 +341,8 @@ export function createKivo(options = {}) {
     const q = `%${text(req.query.q, 100)}%`;
     const status = ['open', 'closed'].includes(req.query.status) ? req.query.status : '';
     const site = text(req.query.site);
-    const rows = db.prepare(`SELECT id FROM conversations WHERE (name LIKE ? OR ip LIKE ? OR page LIKE ? OR id IN (SELECT conversation_id FROM website_users WHERE user_id LIKE ? OR account LIKE ? OR nickname LIKE ?)) AND (?='' OR status=?) AND (?='' OR site_id=?) ORDER BY updated_at DESC LIMIT 200`).all(q,q,q,q,q,q,status,status,site,site);
+    const onlineIds = JSON.stringify([...visitors].filter(([, connections]) => connections.size).map(([id]) => id));
+    const rows = db.prepare(`SELECT id FROM conversations WHERE (name LIKE ? OR ip LIKE ? OR page LIKE ? OR id IN (SELECT conversation_id FROM website_users WHERE user_id LIKE ? OR account LIKE ? OR nickname LIKE ?)) AND (?='' OR status=?) AND (?='' OR site_id=?) ORDER BY CASE WHEN id IN (SELECT value FROM json_each(?)) THEN 0 ELSE 1 END,updated_at DESC,id DESC LIMIT 200`).all(q,q,q,q,q,q,status,status,site,site,onlineIds);
     res.json(rows.map(r => conversation(r.id)));
   });
   registerHistoryRoutes(app, { db, dataDir, io, conversation, updateConversation });
@@ -355,7 +366,7 @@ export function createKivo(options = {}) {
     const c = conversation(req.params.id);
     if (!c) return res.status(404).json({ error: '会话不存在' });
     if (!['open', 'closed'].includes(req.body?.status)) return res.status(400).json({ error: '状态无效' });
-    db.prepare('UPDATE conversations SET status=? WHERE id=?').run(req.body.status, c.id);
+    db.prepare('UPDATE conversations SET status=? WHERE id=?').run(req.body.status, c.id); lifecycle.manual(c.id);
     updateConversation(c.id); res.json({ ok: true });
   });
   app.use('/api/widget', (req, res, next) => {
@@ -406,7 +417,7 @@ export function createKivo(options = {}) {
     updateConversation(c.id);
     return { visitorToken: raw, conversationId: c.id, identity: identity ? {userId:identity.userId,account:identity.account,nickname:identity.nickname,verified:true} : null, site: { id: site.id, name: site.name, color: site.color, greeting: site.greeting, ...siteProfile(site.id) } };
   }
-  const clientApi = registerClientRoutes(app, { db, io, dataDir, publicOrigin, siteById, siteAllows, identitySecret, resolveVisitor, openSession, siteProfile, agentsOnline, saveMessage, imageLimiter, imageBody, upload, ipOf, regionOf, visitors, updateConversation, publishPresence, isKnownOrigin });
+  const clientApi = registerClientRoutes(app, { db, io, dataDir, publicOrigin, siteById, siteAllows, identitySecret, resolveVisitor, openSession, siteProfile, agentsOnline, saveMessage, imageLimiter, imageBody, upload, ipOf, regionOf, visitors, updateConversation, publishPresence, isKnownOrigin, readVisitorMessages });
   io.use((socket, next) => {
     const auth = socket.handshake.auth || {};
     if (auth.role === 'admin') {
@@ -463,6 +474,13 @@ export function createKivo(options = {}) {
         ack({ ok: true, message: saveMessage(id, socket.data.role === 'admin' ? 'agent' : 'visitor', data) });
       } catch (e) { ack({ ok: false, error: e.message }); }
     });
+    socket.on('visitor:read', (data, ack = () => {}) => {
+      if (typeof ack !== 'function' || socket.data.role !== 'visitor') return;
+      try {
+        if (!resolveVisitor(socket.data.siteId,socket.data.visitorToken)) throw new Error('访客凭证无效');
+        ack(readVisitorMessages(socket.data.conversationId, data?.lastId));
+      } catch (e) { ack({ok:false,error:e.message}); }
+    });
     socket.on('visitor:identity', (data, ack = () => {}) => {
       if (typeof ack !== 'function' || socket.data.role !== 'visitor') return;
       const c = resolveVisitor(socket.data.siteId,data?.visitorToken);
@@ -485,6 +503,9 @@ export function createKivo(options = {}) {
       else { const id = socket.data.conversationId; visitors.get(id)?.delete(socket.id); if (!visitors.get(id)?.size) visitors.delete(id); updateConversation(id); publishPresence(); }
     });
   });
+  const lifecycleTimer = setInterval(() => lifecycle.sweep(), 30000);
+  lifecycleTimer.unref();
+  lifecycle.sweep();
   const cleanup = setInterval(() => {
     db.prepare('DELETE FROM sessions WHERE expires<=?').run(now());
     for (const socket of io.of('/').sockets.values()) {
@@ -498,5 +519,5 @@ export function createKivo(options = {}) {
   app.use(express.static(publicDir, { index: 'index.html', maxAge: 0 }));
   app.use('/api', (_req,res) => res.status(404).json({ error: '接口不存在' }));
   app.use((err, _req, res, _next) => { console.error(err.message); res.status(err.status || 500).json({ error: err.status === 413 ? '请求内容过大' : '请求失败，请稍后再试' }); });
-  return { app, server, db, io, close: async () => { clearInterval(cleanup); clientApi.close(); await new Promise(resolve => io.close(resolve)); db.close(); } };
+  return { app, server, db, io, close: async () => { clearInterval(cleanup); clearInterval(lifecycleTimer); clientApi.close(); await new Promise(resolve => io.close(resolve)); db.close(); } };
 }

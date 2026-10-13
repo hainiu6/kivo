@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag (e.g. v1.10.0); must be new'
+        description: 'Release tag (e.g. v1.11.0); must be new'
         required: true
-        default: v1.10.0
+        default: v1.11.0
   push:
     tags: ['v*']
 permissions:
@@ -65,5 +65,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '新增桌面与手机客户端 API：业务后端签发短期凭证，客户端传递用户 ID、账号、昵称和自定义资料；后台显示客户端平台、版本、设备和当前页面。' '支持 HTTP 聊天、图片、历史分页、退出撤销及 Socket.IO 实时消息；同站点同用户跨设备恢复历史。网站原有接入继续可用，密钥只保存在业务后端。' '提供中文接口文档、OpenAPI 3.1 定义、JavaScript 帮助类、实时连接示例和 PHP 后端适配示例。' '通过 50 项测试，验证凭证权限、跨设备隔离、聊天与图片、后台删除同步、凭证撤销及重启保留；双架构 Debian 10 容器测试验证客户端资料、消息和撤销记录升级保留。' '执行 bash /opt/kivo/scripts/upgrade.sh 后强制刷新后台，按 docs/client-api.md 接入客户端。' > release-notes.md
+          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '后台客服消息新增访客已读 / 未读状态；网页仅在会话打开、页面在前台且消息可见时上报，客户端 HTTP / Socket.IO 同样支持已读接口。' '同一浏览器同网站来源同站点跨页面共用会话，修复名称变化及首次同时打开多标签造成的重复会话。旧历史保留；已验证账号仍按用户 ID 隔离。' '在线会话优先，持续离线满 10 分钟自动结束并保留记录；再次上线恢复自动结束的会话。消息、图片和表情更新复用节点，修复记录闪动与后台刷新闪动。' '通过 56 项测试，验证已读权限与持久化、多页面凭证复用、最后连接离线计时、在线排序和消息节点保留；双架构 Debian 10 测试验证安装、备份、升级、回滚及已读数据保留。' '执行 bash /opt/kivo/scripts/upgrade.sh 后刷新后台与接入网页，详见 docs/conversation-behavior.md。' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md

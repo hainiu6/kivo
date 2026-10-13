@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Kivo 客户端 API",
-    "version": "1.10.0",
+    "version": "1.11.0",
     "description": "Windows / macOS / Linux / Android / iOS 通用 HTTPS 接口。长期密钥留在业务后端；用户凭证最多 15 分钟。实时 Socket.IO 协议见文档。"
   },
   "servers": [
@@ -1010,6 +1010,69 @@
           }
         }
       }
+    },
+    "/api/client/v1/read": {
+      "post": {
+        "summary": "用户查看消息后上报已读",
+        "operationId": "readMessages",
+        "security": [
+          {
+            "clientBearer": [],
+            "siteId": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "lastId"
+                ],
+                "properties": {
+                  "lastId": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "已更新",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "消息编号无效或不属于此会话"
+          },
+          "401": {
+            "description": "凭证无效、已过期或已撤销"
+          },
+          "403": {
+            "description": "网页来源不允许"
+          },
+          "404": {
+            "description": "会话不存在"
+          },
+          "429": {
+            "description": "请求过于频繁"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1217,6 +1280,13 @@
               "string",
               "null"
             ]
+          },
+          "read_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "用户首次查看时间，Unix 毫秒；未读为 null"
           }
         }
       },
