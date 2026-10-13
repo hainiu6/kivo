@@ -12,7 +12,10 @@ test('six distinct notification WAVs match browser previews, have stronger avera
     if (sound.source) {
       const wav = readFileSync(new URL(`../public${sound.source}`, import.meta.url));
       assert.equal(wav.readUInt32LE(24), 44100); assert.equal(wav.readUInt16LE(22), 1);
-      assert.equal(wav.readUInt32LE(40), 176400, 'recording retains exactly the requested first two seconds');
+      assert.equal(wav.readUInt32LE(40), 105840, 'recording keeps the approved excerpt after removing 0.8 seconds of leading silence');
+      let onsetPower = 0;
+      for (let i = 0; i < 882; i++) onsetPower += (wav.readInt16LE(44 + i * 2) / 32768) ** 2;
+      assert.ok(Math.sqrt(onsetPower / 882) > 0.02, 'the notification is audible within its first 20 milliseconds');
       let peak = 0;
       for (let i = 44; i < wav.length; i += 2) peak = Math.max(peak, Math.abs(wav.readInt16LE(i) / 32768));
       assert.ok(peak > 0.93 && peak < 0.95, 'recording is normalized without clipping');

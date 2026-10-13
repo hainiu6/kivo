@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag (e.g. v1.11.4); must be new'
+        description: 'Release tag (e.g. v1.11.5); must be new'
         required: true
-        default: v1.11.4
+        default: v1.11.5
   push:
     tags: ['v*']
 permissions:
@@ -65,5 +65,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '第 6 项微信消息提示音替换为用户提供视频的前 2 秒原声，保留原始时序并提高音量；原微信风格选项自动对应到新录音。' '在账号设置 → 新消息提示音中选择第 6 项并试听，选择自动保存。录音与其他声音峰值均为 0.94，保留余量避免削波。' '通过 62 项测试，覆盖录音加载与复用、预览和实际提醒一致、声音切换和退出后的异步隔离、消息提醒与静音、未回复保留；双架构 Debian 10 测试验证安装、备份、升级和回滚。' '执行 bash /opt/kivo/scripts/upgrade.sh 后刷新后台，详见 docs/message-notifications.md。' > release-notes.md
+          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '去掉第 6 项微信消息提示音开头约 0.8 秒空白，保留视频原声与增强音量。声音约 1.2 秒，收到消息立即响起；已有微信消息选择自动使用新版录音。' '在账号设置 → 新消息提示音中选择第 6 项并试听，选择自动保存。录音与其他声音峰值均为 0.94，保留余量避免削波。' '通过 62 项测试，覆盖录音加载与复用、预览和实际提醒一致、声音切换和退出后的异步隔离、消息提醒与静音、未回复保留；双架构 Debian 10 测试验证安装、备份、升级和回滚。' '执行 bash /opt/kivo/scripts/upgrade.sh 后刷新后台，详见 docs/message-notifications.md。' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md
