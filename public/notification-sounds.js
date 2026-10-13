@@ -8,7 +8,7 @@
     { id: 'rise', name: '欢快三音', description: '三个上扬音符，轻快又明显', notes: [[0, 784, 0.32], [0.36, 1046.5, 0.32], [0.72, 1568, 0.46]], harmonics: [1, 0.32, 0.12] },
     { id: 'call', name: '急促呼叫', description: '三次短促呼叫，节奏辨识度高', notes: [[0, 987.8, 0.28], [0.36, 987.8, 0.28], [0.72, 987.8, 0.4]], harmonics: [1, 0.55, 0.25] },
     { id: 'doorbell', name: '经典叮咚', description: '高低两声叮咚，声音饱满', notes: [[0, 1174.66, 0.57], [0.63, 784, 0.76]], harmonics: [1, 0.24, 0.13] },
-    { id: 'wechat', name: '微信消息', description: '用户提供视频的前 1 秒原声，增强音量', source: '/sounds/wechat.wav' }
+    { id: 'wechat', name: '微信消息', description: '用户提供视频的前 2 秒原声，增强音量', source: '/sounds/wechat.wav' }
   ];
   function synthesize(id, sampleRate) {
     const sound = sounds.find(s => s.id === id) || sounds[0];
