@@ -48,6 +48,9 @@ if (process.argv[2] !== 'verify') {
   const nativeId=receiptDb.prepare("SELECT conversation_id FROM website_users WHERE user_id='docker-native'").get().conversation_id;
   const outgoing=receiptDb.prepare("INSERT INTO messages(conversation_id,sender,body,client_id,created_at) VALUES(?,'agent','Read receipt probe',?,?)").run(nativeId,randomUUID(),Date.now()).lastInsertRowid;
   receiptDb.close();
+  const noteResponse = await fetch(base+`/api/admin/conversations/${nativeId}/note`, { method:'PUT', headers:{Origin:origin,Cookie:login.cookie,'Content-Type':'application/json'}, body:JSON.stringify({note:'Docker 访客备注',updatedAt:0}) });
+  assert.equal(noteResponse.status,200);
+  assert.equal((await noteResponse.json()).note,'Docker 访客备注');
   assert.equal((await fetch(base+'/api/client/v1/read',{method:'POST',headers:nativeHeaders,body:JSON.stringify({lastId:Number(outgoing)})})).status,200);
   const revoked=await(await fetch(base+'/api/client/v1/tokens',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+identity.secret},body:JSON.stringify({siteId:site.id,user:{userId:'docker-native',account:'native@example.com'}})})).json();
   assert.equal((await fetch(base+'/api/client/v1/session',{method:'DELETE',headers:{Authorization:'Bearer '+revoked.token,'X-Kivo-Site':site.id}})).status,200);
@@ -75,6 +78,9 @@ assert.equal(JSON.parse(db.prepare('SELECT attributes FROM client_profiles WHERE
 assert.equal(db.prepare("SELECT body FROM messages WHERE conversation_id=? AND sender='visitor'").get(native.conversation_id).body,'客户端升级保留测试');
 assert.equal(db.prepare('SELECT COUNT(*) AS n FROM client_revocations').get().n,1,'revocations survive upgrade');
 assert.ok(db.prepare("SELECT read_at FROM messages WHERE conversation_id=? AND sender='agent'").get(native.conversation_id).read_at,'read receipts survive upgrade');
+assert.equal(db.prepare('SELECT note FROM visitor_notes WHERE conversation_id=?').get(native.conversation_id).note,'Docker 访客备注','notes survive upgrade and rollback');
+const persistedNote=await fetch(base+`/api/admin/conversations/${native.conversation_id}/note`,{headers:{Cookie:login.cookie}});
+assert.equal(persistedNote.status,200);assert.equal((await persistedNote.json()).note,'Docker 访客备注');
 assert.equal(db.prepare('PRAGMA user_version').get().user_version,6);
 const tracking = db.prepare('SELECT id FROM analytics_sites WHERE name=?').get('Docker 访问统计测试');
 assert.equal(db.prepare('SELECT COUNT(*) AS n FROM page_views WHERE site_id=?').get(tracking.id).n, 2, 'analytics sites and visits survive upgrade');
@@ -99,4 +105,4 @@ for (const item of media) {
   assert.deepEqual(downloaded, await readFile('/app/data/media/' + item.id + '.webp'));
 }
 db.close();
-console.log('Container analytics persistence, uploads, history deletion, account identity, authentication and persisted media passed.');
+console.log('Container private notes, analytics persistence, uploads, history deletion, account identity, authentication and persisted media passed.');

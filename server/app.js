@@ -14,6 +14,7 @@ import { MAX_IMAGE_BYTES, storeImage } from './media.js';
 import multer from 'multer';
 import { verifyIdentity } from './identity.js';
 import { registerHistoryRoutes } from './history.js';
+import { registerVisitorNoteRoutes } from './visitor-notes.js';
 import { visitorIP } from './ip.js';
 import { registerStatsRoutes } from './stats.js';
 import { registerAnalyticsRoutes } from './analytics.js';
@@ -345,6 +346,7 @@ export function createKivo(options = {}) {
     const rows = db.prepare(`SELECT id FROM conversations WHERE (name LIKE ? OR ip LIKE ? OR page LIKE ? OR id IN (SELECT conversation_id FROM website_users WHERE user_id LIKE ? OR account LIKE ? OR nickname LIKE ?)) AND (?='' OR status=?) AND (?='' OR site_id=?) ORDER BY CASE WHEN id IN (SELECT value FROM json_each(?)) THEN 0 ELSE 1 END,updated_at DESC,id DESC LIMIT 200`).all(q,q,q,q,q,q,status,status,site,site,onlineIds);
     res.json(rows.map(r => conversation(r.id)));
   });
+  registerVisitorNoteRoutes(app, { db, io });
   registerHistoryRoutes(app, { db, dataDir, io, conversation, updateConversation });
   app.get('/api/admin/conversations/:id', (req, res) => {
     const c = conversation(req.params.id);
