@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag (e.g. v1.11.0); must be new'
+        description: 'Release tag (e.g. v1.11.1); must be new'
         required: true
-        default: v1.11.0
+        default: v1.11.1
   push:
     tags: ['v*']
 permissions:
@@ -65,5 +65,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '后台客服消息新增访客已读 / 未读状态；网页仅在会话打开、页面在前台且消息可见时上报，客户端 HTTP / Socket.IO 同样支持已读接口。' '同一浏览器同网站来源同站点跨页面共用会话，修复名称变化及首次同时打开多标签造成的重复会话。旧历史保留；已验证账号仍按用户 ID 隔离。' '在线会话优先，持续离线满 10 分钟自动结束并保留记录；再次上线恢复自动结束的会话。消息、图片和表情更新复用节点，修复记录闪动与后台刷新闪动。' '通过 56 项测试，验证已读权限与持久化、多页面凭证复用、最后连接离线计时、在线排序和消息节点保留；双架构 Debian 10 测试验证安装、备份、升级、回滚及已读数据保留。' '执行 bash /opt/kivo/scripts/upgrade.sh 后刷新后台与接入网页，详见 docs/conversation-behavior.md。' > release-notes.md
+          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '持续离线满 10 分钟只自动结束没有待人工回复消息的会话；后台已查看和自动回复均不算人工回复。升级恢复旧规则自动结束但尚未回复的会话，保留人工结束状态。' '新增 5 种更响亮的提示音：清亮单叮、醒目双叮、欢快三音、急促呼叫、经典叮咚。在账号设置中选择、试听并自动保存；静音偏好保留。' '通过 61 项测试，覆盖未回复保留、人工回复后结束、升级恢复、声音选择与静音、音频波形与 WAV 一致、响度和防削波；双架构 Debian 10 测试验证安装、备份、升级、回滚及已读数据保留。' '执行 bash /opt/kivo/scripts/upgrade.sh 后刷新后台，详见 docs/conversation-behavior.md 和 docs/message-notifications.md。' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md

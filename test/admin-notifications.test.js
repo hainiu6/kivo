@@ -3,25 +3,28 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-function harness({ muted = false, blocked = false } = {}) {
+function harness({ muted = false, blocked = false, savedSound } = {}) {
   const events = {}, timers = new Map(), counts = [], requests = [], stored = new Map();
   if (muted) stored.set('kivo.admin.sound', 'off');
+  if (savedSound) stored.set('kivo.admin.sound.selection', savedSound);
   let now = 1000, nextTimer = 0, tones = 0, context;
   const label = {}, icon = {}, button = { dataset: {}, attributes: {}, querySelector: selector => selector === '.sound-label' ? label : icon, contains: node => node === button, setAttribute(key, value) { this.attributes[key] = value; } };
   class Audio {
-    constructor() { context = this; this.state = 'suspended'; this.currentTime = 0; this.destination = {}; }
+    constructor() { context = this; this.state = 'suspended'; this.sampleRate = 44100; this.currentTime = 0; this.destination = {}; this.played = []; }
     async resume() { if (blocked) throw new Error('gesture required'); this.state = 'running'; this.onstatechange?.(); }
     async close() { this.state = 'closed'; }
-    createOscillator() { return { frequency: {}, connect() {}, disconnect() {}, start() { tones++; }, stop() {} }; }
-    createGain() { return { gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {}, disconnect() {} }; }
+    createBuffer(channels, length, sampleRate) { return { length, sampleRate, copyToChannel(samples) { this.samples = samples; } }; }
+    createBufferSource() { const audio = this; return { connect() {}, disconnect() {}, start() { tones++; audio.played.push(this.buffer); }, stop() { this.stopped = true; } }; }
   }
   const document = { title: '', addEventListener: (event, callback) => { events[event] = callback; } }, favicon = {}, window = { AudioContext: Audio };
+  vm.runInNewContext(readFileSync(new URL('../public/notification-sounds.js', import.meta.url), 'utf8'), { window });
   vm.runInNewContext(readFileSync(new URL('../public/admin-notifications.js', import.meta.url), 'utf8'), {
     window, document, localStorage: { getItem: key => stored.get(key), setItem: (key, value) => stored.set(key, value) },
     Date: { now: () => now }, setTimeout: callback => { timers.set(++nextTimer, callback); return nextTimer; }, clearTimeout: id => timers.delete(id)
   });
-  const notifications = window.KivoNotifications.create({ button, favicon, onCount: count => counts.push(count), getUnread: () => new Promise(resolve => requests.push(resolve)) });
-  return { notifications, button, document, favicon, events, counts, stored, requests, get context() { return context; }, get tones() { return tones; }, nextTone: () => { now += 1500; }, flush: async () => { const [id, callback] = timers.entries().next().value || []; if (callback) { timers.delete(id); callback(); } await Promise.resolve(); }, tick: async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); } };
+  const soundSelect = {}, previewButton = {}, previewStatus = {};
+  const notifications = window.KivoNotifications.create({ button, favicon, soundSelect, previewButton, previewStatus, onCount: count => counts.push(count), getUnread: () => new Promise(resolve => requests.push(resolve)) });
+  return { notifications, button, soundSelect, previewButton, previewStatus, document, favicon, events, counts, stored, requests, get context() { return context; }, get tones() { return tones; }, nextTone: () => { now += 2000; }, flush: async () => { const [id, callback] = timers.entries().next().value || []; if (callback) { timers.delete(id); callback(); } await Promise.resolve(); }, tick: async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); } };
 }
 
 test('new visitor messages play the single ding once; replies, history, bursts and duplicates stay quiet', async () => {
@@ -63,4 +66,36 @@ test('muted preference persists and blocked audio leaves an actionable enable bu
   const h = harness({ blocked: true }); h.notifications.start(); h.button.onclick(); await h.tick();
   assert.equal(h.button.dataset.state, 'pending'); assert.equal(h.button.title, '点击启用提示音');
   h.notifications.receive({ id: 1, sender: 'visitor' }); assert.equal(h.tones, 0); assert.equal(h.counts.at(-1), 1);
+});
+
+test('all five choices preview at the same level as notifications, persist and preserve the mute preference', async () => {
+  const h = harness({ muted: true, savedSound: 'doorbell' }); h.notifications.start();
+  assert.equal(h.soundSelect.value, 'doorbell');
+  const lengths = new Set();
+  for (const id of ['bright','double','rise','call','doorbell']) {
+    h.soundSelect.value = id; h.soundSelect.onchange();
+    assert.equal(h.stored.get('kivo.admin.sound.selection'), id);
+    h.previewButton.onclick(); await h.tick();
+    lengths.add(h.context.played.at(-1).length);
+    assert.match(h.previewStatus.textContent, /消息提示仍为静音/);
+    assert.equal(h.counts.length, 0, 'previews do not change unread counts');
+  }
+  assert.equal(lengths.size, 5, 'each choice uses its own waveform');
+  assert.equal(h.stored.get('kivo.admin.sound'), 'off');
+  h.notifications.receive({ id: 1, sender: 'visitor' }); assert.equal(h.tones, 5, 'preview never unmutes incoming alerts');
+  h.button.onclick(); await h.tick(); const preview = h.context.played.at(-1);
+  h.notifications.receive({ id: 2, sender: 'visitor' });
+  assert.equal(h.context.played.at(-1), preview, 'incoming alert reuses the selected preview buffer');
+  const restored = harness({ savedSound: h.stored.get('kivo.admin.sound.selection') }); assert.equal(restored.soundSelect.value, 'doorbell');
+  const fallback = harness({ savedSound: 'invalid' }); assert.equal(fallback.soundSelect.value, 'bright');
+  h.soundSelect.value = 'invalid'; h.soundSelect.onchange(); assert.equal(h.soundSelect.value, 'doorbell');
+});
+
+test('a blocked preview is actionable and logout cancels an in-flight audio unlock', async () => {
+  const blocked = harness({ muted: true, blocked: true }); blocked.notifications.start();
+  blocked.previewButton.onclick(); await blocked.tick(); assert.match(blocked.previewStatus.textContent, /再次点击试听/); assert.equal(blocked.tones, 0);
+  const h = harness(); h.notifications.start(); h.previewButton.onclick(); h.notifications.reset(); await h.tick();
+  assert.equal(h.tones, 0); assert.equal(h.previewStatus.textContent, '');
+  const rejected = harness({ blocked: true }); rejected.notifications.start(); rejected.previewButton.onclick(); rejected.notifications.reset(); await rejected.tick();
+  assert.equal(rejected.previewStatus.textContent, '', 'late audio rejection cannot restore logout UI');
 });

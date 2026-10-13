@@ -38,7 +38,7 @@ let clearedThroughId=0, deletedMessageIds=new Set(), deletePlan, deleteRevision=
 const visibleMessage = m => m.id>clearedThroughId&&!deletedMessageIds.has(m.id);
 const composer = KivoChat.composer({form:$('#message-form'),input:$('#message-input'),tools:$('#chat-tools'),preview:$('#attachment-preview'),dropTarget:$('#chat-active'),getContext:()=>socket?.connected&&!loadingMessages&&!sending?activeId:'',uploadUrl:id=>`/api/admin/conversations/${id}/images`,onError:message=>$('#send-error').textContent=message,onSubmitLock:locked=>$('#send-message').disabled=locked||sending||loadingMessages||!socket?.connected});
 const drafts = new Map();
-const notifications = KivoNotifications.create({button:$('#notification-sound'),favicon:$('#admin-favicon'),getUnread:()=>api('/api/admin/unread'),onCount:total=>{
+const notifications = KivoNotifications.create({button:$('#notification-sound'),soundSelect:$('#notification-sound-choice'),previewButton:$('#notification-sound-preview'),previewStatus:$('#notification-sound-status'),favicon:$('#admin-favicon'),getUnread:()=>api('/api/admin/unread'),onCount:total=>{
   $('#nav-unread').textContent=total>99?'99+':total;$('#nav-unread').hidden=!total;
 }});
 const stats = KivoStats.create({api,onChange:()=>rememberWorkspace()});

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Kivo 客户端 API",
-    "version": "1.11.0",
+    "version": "1.11.1",
     "description": "Windows / macOS / Linux / Android / iOS 通用 HTTPS 接口。长期密钥留在业务后端；用户凭证最多 15 分钟。实时 Socket.IO 协议见文档。"
   },
   "servers": [

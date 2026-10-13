@@ -1,13 +1,21 @@
 /* global window */
 (() => {
   const soundKey = 'kivo.admin.sound';
+  const selectionKey = 'kivo.admin.sound.selection';
+  const { sounds, synthesize } = window.KivoNotificationSounds;
   window.KivoNotifications = {
-    create({ button, favicon, getUnread, onCount }) {
+    create({ button, favicon, getUnread, onCount, soundSelect, previewButton, previewStatus }) {
       let enabled = true, active = false, audio, total = 0, generation = 0;
+      let selection = sounds[0].id, source;
+      const buffers = new Map();
       let timer, refreshing = false, dirty = false, lastTone = -Infinity;
       const seen = new Set();
       try { enabled = localStorage.getItem(soundKey) !== 'off'; } catch {}
+      try { const saved = localStorage.getItem(selectionKey); if (sounds.some(s => s.id === saved)) selection = saved; } catch {}
       const supported = Boolean(window.AudioContext || window.webkitAudioContext);
+      if (soundSelect) { soundSelect.value = selection; soundSelect.disabled = !supported; }
+      if (previewButton) previewButton.disabled = !supported;
+      function showPreviewStatus(message) { if (previewStatus) previewStatus.textContent = message; }
       function renderSound() {
         const ready = audio?.state === 'running';
         const label = !supported ? '浏览器不支持提示音' : !enabled ? '提示音已静音，点击开启' : ready ? '提示音已开启，点击静音' : '点击启用提示音';
@@ -25,23 +33,26 @@
         favicon.href = total ? '/favicon-unread.png' : '/favicon.png';
         onCount(total);
       }
-      function tone(force = false) {
-        if (!active || !enabled || audio?.state !== 'running' || (!force && Date.now() - lastTone < 1300)) return;
-        lastTone = Date.now();
+      function tone(preview = false) {
+        if (!active || (!enabled && !preview) || audio?.state !== 'running' || (!preview && Date.now() - lastTone < 1600)) return false;
+        if (!preview) lastTone = Date.now();
         try {
-          const start = audio.currentTime;
-          const oscillator = audio.createOscillator(), gain = audio.createGain();
-          oscillator.type = 'triangle'; oscillator.frequency.value = 1174.66;
-          gain.gain.setValueAtTime(0, start);
-          gain.gain.linearRampToValueAtTime(0.72, start + 0.01);
-          gain.gain.exponentialRampToValueAtTime(0.001, start + 0.65);
-          oscillator.connect(gain); gain.connect(audio.destination);
-          oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
-          oscillator.start(start); oscillator.stop(start + 0.66);
-        } catch { renderSound(); }
+          let buffer = buffers.get(selection);
+          if (!buffer) {
+            const samples = synthesize(selection, audio.sampleRate);
+            buffer = audio.createBuffer(1, samples.length, audio.sampleRate);
+            buffer.copyToChannel(samples, 0); buffers.set(selection, buffer);
+          }
+          if (source) { source.stop(); source.disconnect(); }
+          const next = audio.createBufferSource(); source = next;
+          next.buffer = buffer; next.connect(audio.destination);
+          next.onended = () => { next.disconnect(); if (source === next) source = undefined; };
+          next.start();
+          return true;
+        } catch { renderSound(); return false; }
       }
       async function unlock(preview = false) {
-        if (!active || !enabled || !supported) return;
+        if (!active || (!enabled && !preview) || !supported) return;
         const current = generation;
         try {
           if (!audio) {
@@ -50,8 +61,9 @@
           }
           await audio.resume();
           if (current !== generation) return;
-          renderSound(); if (preview) tone(true);
-        } catch { renderSound(); }
+          renderSound();
+          if (preview) showPreviewStatus(tone(true) ? `正在试听：${sounds.find(s => s.id === selection).name}${enabled ? '' : '（消息提示仍为静音）'}` : '未能播放，请再次点击试听');
+        } catch { if (current !== generation) return; renderSound(); if (preview) showPreviewStatus('浏览器未允许播放，请再次点击试听'); }
       }
       function refresh() {
         if (!active) return;
@@ -76,6 +88,13 @@
         try { localStorage.setItem(soundKey, enabled ? 'on' : 'off'); } catch {}
         renderSound();
       };
+      if (soundSelect) soundSelect.onchange = () => {
+        if (!sounds.some(s => s.id === soundSelect.value)) { soundSelect.value = selection; return; }
+        selection = soundSelect.value;
+        try { localStorage.setItem(selectionKey, selection); } catch {}
+        showPreviewStatus(`已选择：${sounds.find(s => s.id === selection).name}${enabled ? '' : '（消息提示仍为静音）'}`);
+      };
+      if (previewButton) previewButton.onclick = () => unlock(true);
       // A trusted click/key press also unlocks audio after login, including Safari.
       const gesture = event => { if (event.isTrusted && !button.contains(event.target) && audio?.state !== 'running') unlock(); };
       document.addEventListener('pointerdown', gesture);
@@ -92,6 +111,8 @@
         reset() {
           active = false; generation++; clearTimeout(timer); timer = undefined; dirty = false; refreshing = false;
           seen.clear(); setCount(0); lastTone = -Infinity;
+          if (source) { source.stop(); source.disconnect(); source = undefined; }
+          buffers.clear(); showPreviewStatus('');
           if (audio) { audio.onstatechange = null; audio.close().catch(() => {}); audio = undefined; }
           renderSound();
         }
