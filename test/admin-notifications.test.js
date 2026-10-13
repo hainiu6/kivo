@@ -3,28 +3,43 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-function harness({ muted = false, blocked = false, savedSound } = {}) {
+function harness({ muted = false, blocked = false, savedSound, delaySound = false, soundError = false } = {}) {
   const events = {}, timers = new Map(), counts = [], requests = [], stored = new Map();
   if (muted) stored.set('kivo.admin.sound', 'off');
   if (savedSound) stored.set('kivo.admin.sound.selection', savedSound);
   let now = 1000, nextTimer = 0, tones = 0, context;
+  let resolveSound;
+  const soundRequests = [];
   const label = {}, icon = {}, button = { dataset: {}, attributes: {}, querySelector: selector => selector === '.sound-label' ? label : icon, contains: node => node === button, setAttribute(key, value) { this.attributes[key] = value; } };
   class Audio {
     constructor() { context = this; this.state = 'suspended'; this.sampleRate = 44100; this.currentTime = 0; this.destination = {}; this.played = []; }
     async resume() { if (blocked) throw new Error('gesture required'); this.state = 'running'; this.onstatechange?.(); }
     async close() { this.state = 'closed'; }
     createBuffer(channels, length, sampleRate) { return { length, sampleRate, copyToChannel(samples) { this.samples = samples; } }; }
+    async decodeAudioData(data) {
+      const wav = Buffer.from(data), buffer = this.createBuffer(1, wav.readUInt32LE(40) / 2, 44100), samples = new Float32Array(buffer.length);
+      for (let i = 0; i < samples.length; i++) samples[i] = wav.readInt16LE(44 + i * 2) / 32768;
+      buffer.copyToChannel(samples); return buffer;
+    }
     createBufferSource() { const audio = this; return { connect() {}, disconnect() {}, start() { tones++; audio.played.push(this.buffer); }, stop() { this.stopped = true; } }; }
   }
   const document = { title: '', addEventListener: (event, callback) => { events[event] = callback; } }, favicon = {}, window = { AudioContext: Audio };
   vm.runInNewContext(readFileSync(new URL('../public/notification-sounds.js', import.meta.url), 'utf8'), { window });
   vm.runInNewContext(readFileSync(new URL('../public/admin-notifications.js', import.meta.url), 'utf8'), {
     window, document, localStorage: { getItem: key => stored.get(key), setItem: (key, value) => stored.set(key, value) },
+    fetch: async url => {
+      soundRequests.push(url);
+      if (delaySound) await new Promise(resolve => { resolveSound = resolve; });
+      return { ok: !soundError, arrayBuffer: async () => {
+        const wav = readFileSync(new URL('../public' + url, import.meta.url));
+        return wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength);
+      } };
+    },
     Date: { now: () => now }, setTimeout: callback => { timers.set(++nextTimer, callback); return nextTimer; }, clearTimeout: id => timers.delete(id)
   });
   const soundSelect = {}, previewButton = {}, previewStatus = {};
   const notifications = window.KivoNotifications.create({ button, favicon, soundSelect, previewButton, previewStatus, onCount: count => counts.push(count), getUnread: () => new Promise(resolve => requests.push(resolve)) });
-  return { notifications, button, soundSelect, previewButton, previewStatus, document, favicon, events, counts, stored, requests, get context() { return context; }, get tones() { return tones; }, nextTone: () => { now += 2000; }, flush: async () => { const [id, callback] = timers.entries().next().value || []; if (callback) { timers.delete(id); callback(); } await Promise.resolve(); }, tick: async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); } };
+  return { notifications, button, soundSelect, previewButton, previewStatus, soundRequests, resolveSound: () => resolveSound?.(), document, favicon, events, counts, stored, requests, get context() { return context; }, get tones() { return tones; }, nextTone: () => { now += 2000; }, flush: async () => { const [id, callback] = timers.entries().next().value || []; if (callback) { timers.delete(id); callback(); } await Promise.resolve(); }, tick: async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); } };
 }
 
 test('new visitor messages play the single ding once; replies, history, bursts and duplicates stay quiet', async () => {
@@ -35,10 +50,10 @@ test('new visitor messages play the single ding once; replies, history, bursts a
   h.events.pointerdown({ isTrusted: false, target: {} }); await h.tick(); assert.equal(h.context, undefined);
   h.events.pointerdown({ isTrusted: true, target: {} }); await h.tick();
   assert.equal(h.context.state, 'running');
-  h.notifications.receive({ id: 1, sender: 'visitor' }); assert.equal(h.tones, 1); assert.equal(h.counts.at(-1), 8);
+  h.notifications.receive({ id: 1, sender: 'visitor' }); await h.tick(); assert.equal(h.tones, 1); assert.equal(h.counts.at(-1), 8);
   h.nextTone(); h.notifications.receive({ id: 1, sender: 'visitor' }); assert.equal(h.tones, 1, 'duplicate delivery must not ring twice');
   h.notifications.receive({ id: 2, sender: 'agent' }); h.notifications.receive({ id: 3, sender: 'auto' }); assert.equal(h.tones, 1);
-  h.notifications.receive({ id: 4, sender: 'visitor', kind: 'image' }); assert.equal(h.tones, 2);
+  h.notifications.receive({ id: 4, sender: 'visitor', kind: 'image' }); await h.tick(); assert.equal(h.tones, 2);
   h.notifications.receive({ id: 5, sender: 'visitor', kind: 'sticker' }); assert.equal(h.tones, 2, 'a burst uses one alert');
   h.button.onclick(); assert.equal(h.stored.get('kivo.admin.sound'), 'off'); h.nextTone();
   h.notifications.receive({ id: 6, sender: 'visitor' }); assert.equal(h.tones, 2); assert.equal(h.counts.at(-1), 11);
@@ -85,6 +100,7 @@ test('all six choices preview at the same level as notifications, persist and pr
   h.notifications.receive({ id: 1, sender: 'visitor' }); assert.equal(h.tones, 6, 'preview never unmutes incoming alerts');
   h.button.onclick(); await h.tick(); const preview = h.context.played.at(-1);
   h.notifications.receive({ id: 2, sender: 'visitor' });
+  await h.tick();
   assert.equal(h.context.played.at(-1), preview, 'incoming alert reuses the selected preview buffer');
   const restored = harness({ savedSound: h.stored.get('kivo.admin.sound.selection') }); assert.equal(restored.soundSelect.value, 'wechat');
   const fallback = harness({ savedSound: 'invalid' }); assert.equal(fallback.soundSelect.value, 'bright');
@@ -98,4 +114,19 @@ test('a blocked preview is actionable and logout cancels an in-flight audio unlo
   assert.equal(h.tones, 0); assert.equal(h.previewStatus.textContent, '');
   const rejected = harness({ blocked: true }); rejected.notifications.start(); rejected.previewButton.onclick(); rejected.notifications.reset(); await rejected.tick();
   assert.equal(rejected.previewStatus.textContent, '', 'late audio rejection cannot restore logout UI');
+});
+
+test('recorded audio is loaded once, actual alerts use that recording and late loads cannot play after logout or sound changes', async () => {
+  const h = harness({ savedSound: 'wechat', delaySound: true }); h.notifications.start();
+  h.events.pointerdown({ isTrusted: true, target: {} }); await h.tick();
+  assert.deepEqual(h.soundRequests, ['/sounds/wechat.wav']);
+  h.notifications.receive({ id: 1, sender: 'visitor' }); h.previewButton.onclick(); await h.tick();
+  assert.equal(h.soundRequests.length, 1, 'concurrent warm-up, preview and alert share a single load');
+  h.notifications.reset(); h.resolveSound(); await h.tick(); assert.equal(h.tones, 0);
+  const changed = harness({ savedSound: 'wechat', delaySound: true }); changed.notifications.start();
+  changed.previewButton.onclick(); await changed.tick(); changed.soundSelect.value = 'bright'; changed.soundSelect.onchange();
+  changed.resolveSound(); await changed.tick(); assert.equal(changed.tones, 0, 'a stale recording cannot play after selecting another sound');
+  const failed = harness({ savedSound: 'wechat', soundError: true }); failed.notifications.start();
+  failed.previewButton.onclick(); await failed.tick(); assert.match(failed.previewStatus.textContent, /再次点击试听/); assert.equal(failed.tones, 0);
+  failed.notifications.receive({ id: 2, sender: 'visitor' }); await failed.tick(); assert.equal(failed.counts.at(-1), 1, 'failed audio cannot lose a message notification');
 });

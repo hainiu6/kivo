@@ -9,6 +9,15 @@ test('six distinct notification WAVs match browser previews, have stronger avera
   const { sounds, synthesize } = context.window.KivoNotificationSounds;
   assert.equal(sounds.length, 6); assert.equal(new Set(sounds.map(s => s.id)).size, 6);
   for (const sound of sounds) {
+    if (sound.source) {
+      const wav = readFileSync(new URL(`../public${sound.source}`, import.meta.url));
+      assert.equal(wav.readUInt32LE(24), 44100); assert.equal(wav.readUInt16LE(22), 1);
+      assert.equal(wav.readUInt32LE(40), 88200, 'recording retains exactly the requested first second');
+      let peak = 0;
+      for (let i = 44; i < wav.length; i += 2) peak = Math.max(peak, Math.abs(wav.readInt16LE(i) / 32768));
+      assert.ok(peak > 0.93 && peak < 0.95, 'recording is normalized without clipping');
+      continue;
+    }
     const samples = synthesize(sound.id, 44100), wav = readFileSync(new URL(`../public/sounds/${sound.id}.wav`, import.meta.url));
     assert.equal(wav.toString('ascii', 0, 4), 'RIFF'); assert.equal(wav.readUInt32LE(24), 44100);
     assert.equal(wav.length, 44 + samples.length * 2);

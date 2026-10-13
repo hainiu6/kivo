@@ -8,6 +8,7 @@
       let enabled = true, active = false, audio, total = 0, generation = 0;
       let selection = sounds[0].id, source;
       const buffers = new Map();
+      const loading = new Map();
       let timer, refreshing = false, dirty = false, lastTone = -Infinity;
       const seen = new Set();
       try { enabled = localStorage.getItem(soundKey) !== 'off'; } catch {}
@@ -33,23 +34,41 @@
         favicon.href = total ? '/favicon-unread.png' : '/favicon.png';
         onCount(total);
       }
-      function tone(preview = false) {
+      async function soundBuffer(id) {
+        if (buffers.has(id)) return buffers.get(id);
+        if (loading.has(id)) return loading.get(id);
+        const sound = sounds.find(s => s.id === id), context = audio, current = generation;
+        const pending = (async () => {
+          let buffer;
+          if (sound.source) {
+            const response = await fetch(sound.source);
+            if (!response.ok) throw new Error('Sound file unavailable');
+            buffer = await context.decodeAudioData(await response.arrayBuffer());
+          } else {
+            const samples = synthesize(id, context.sampleRate);
+            buffer = context.createBuffer(1, samples.length, context.sampleRate); buffer.copyToChannel(samples, 0);
+          }
+          if (current === generation && context === audio) buffers.set(id, buffer);
+          return buffer;
+        })();
+        loading.set(id, pending);
+        try { return await pending; }
+        finally { if (loading.get(id) === pending) loading.delete(id); }
+      }
+      async function tone(preview = false) {
         if (!active || (!enabled && !preview) || audio?.state !== 'running' || (!preview && Date.now() - lastTone < 1600)) return false;
         if (!preview) lastTone = Date.now();
+        const current = generation, id = selection;
         try {
-          let buffer = buffers.get(selection);
-          if (!buffer) {
-            const samples = synthesize(selection, audio.sampleRate);
-            buffer = audio.createBuffer(1, samples.length, audio.sampleRate);
-            buffer.copyToChannel(samples, 0); buffers.set(selection, buffer);
-          }
+          const buffer = await soundBuffer(id);
+          if (!active || current !== generation || id !== selection || (!enabled && !preview) || audio?.state !== 'running') return false;
           if (source) { source.stop(); source.disconnect(); }
           const next = audio.createBufferSource(); source = next;
           next.buffer = buffer; next.connect(audio.destination);
           next.onended = () => { next.disconnect(); if (source === next) source = undefined; };
           next.start();
           return true;
-        } catch { renderSound(); return false; }
+        } catch { if (current === generation) renderSound(); return false; }
       }
       async function unlock(preview = false) {
         if (!active || (!enabled && !preview) || !supported) return;
@@ -62,7 +81,11 @@
           await audio.resume();
           if (current !== generation) return;
           renderSound();
-          if (preview) showPreviewStatus(tone(true) ? `正在试听：${sounds.find(s => s.id === selection).name}${enabled ? '' : '（消息提示仍为静音）'}` : '未能播放，请再次点击试听');
+          if (preview) {
+            const id = selection, played = await tone(true);
+            if (current !== generation || id !== selection) return;
+            showPreviewStatus(played ? `正在试听：${sounds.find(s => s.id === selection).name}${enabled ? '' : '（消息提示仍为静音）'}` : '未能播放，请再次点击试听');
+          } else soundBuffer(selection).catch(() => {});
         } catch { if (current !== generation) return; renderSound(); if (preview) showPreviewStatus('浏览器未允许播放，请再次点击试听'); }
       }
       function refresh() {
@@ -106,13 +129,13 @@
         receive(message) {
           if (!active || message?.sender !== 'visitor' || !Number.isSafeInteger(message.id) || seen.has(message.id)) return;
           seen.add(message.id); if (seen.size > 1000) seen.delete(seen.values().next().value);
-          setCount(total + 1); tone(); refresh();
+          setCount(total + 1); void tone(); refresh();
         },
         reset() {
           active = false; generation++; clearTimeout(timer); timer = undefined; dirty = false; refreshing = false;
           seen.clear(); setCount(0); lastTone = -Infinity;
           if (source) { source.stop(); source.disconnect(); source = undefined; }
-          buffers.clear(); showPreviewStatus('');
+          buffers.clear(); loading.clear(); showPreviewStatus('');
           if (audio) { audio.onstatechange = null; audio.close().catch(() => {}); audio = undefined; }
           renderSound();
         }

@@ -7,6 +7,8 @@ const { sounds, synthesize } = context.window.KivoNotificationSounds;
 const destination = new URL('../public/sounds/', import.meta.url);
 mkdirSync(destination, { recursive: true });
 for (const sound of sounds) {
+  // Keep the approved video excerpt; do not replace it with a synthesized voice.
+  if (sound.source) { console.log(`${sound.id}: using recorded audio ${sound.source}`); continue; }
   const rate = 44100, samples = synthesize(sound.id, rate), bytes = samples.length * 2;
   const wav = Buffer.alloc(44 + bytes);
   wav.write('RIFF', 0); wav.writeUInt32LE(36 + bytes, 4); wav.write('WAVEfmt ', 8);
