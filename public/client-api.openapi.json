@@ -1,0 +1,1334 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Kivo 客户端 API",
+    "version": "1.10.0",
+    "description": "Windows / macOS / Linux / Android / iOS 通用 HTTPS 接口。长期密钥留在业务后端；用户凭证最多 15 分钟。实时 Socket.IO 协议见文档。"
+  },
+  "servers": [
+    {
+      "url": "https://kivo.2222255.xyz",
+      "description": "客服服务地址；替换成你的部署域名"
+    }
+  ],
+  "externalDocs": {
+    "description": "HTTP 接入流程、Socket.IO 事件及示例",
+    "url": "https://github.com/panhui/Kivo/blob/main/docs/client-api.md"
+  },
+  "paths": {
+    "/api/client/v1/tokens": {
+      "post": {
+        "summary": "业务后端签发客户端短期凭证，禁止浏览器 Origin",
+        "security": [
+          {
+            "backendKey": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Token"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "凭证无效、过期或撤销",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "来源不允许",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "会话或图片不存在 / 无权限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过频繁，按 Retry-After 退避",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "siteId",
+                  "user"
+                ],
+                "properties": {
+                  "siteId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "user": {
+                    "$ref": "#/components/schemas/User"
+                  },
+                  "ttl": {
+                    "type": "integer",
+                    "minimum": 60,
+                    "maximum": 900,
+                    "default": 900
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/client/v1/sessions": {
+      "post": {
+        "summary": "创建或刷新已验证用户的客户端会话",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "凭证无效、过期或撤销",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "来源不允许",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "会话或图片不存在 / 无权限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过频繁，按 Retry-After 退避",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "siteId",
+                  "identityToken",
+                  "client"
+                ],
+                "properties": {
+                  "siteId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "identityToken": {
+                    "type": "string",
+                    "maxLength": 8192
+                  },
+                  "client": {
+                    "$ref": "#/components/schemas/Client"
+                  },
+                  "screen": {
+                    "type": "string",
+                    "maxLength": 128
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/client/v1/session": {
+      "get": {
+        "summary": "读取客服状态，并维持客户端在线",
+        "security": [
+          {
+            "clientBearer": [],
+            "siteId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "凭证无效、过期或撤销",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "来源不允许",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "会话或图片不存在 / 无权限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过频繁，按 Retry-After 退避",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "退出并撤销当前凭证，保留记录",
+        "security": [
+          {
+            "clientBearer": [],
+            "siteId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "凭证无效、过期或撤销",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "来源不允许",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "会话或图片不存在 / 无权限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过频繁，按 Retry-After 退避",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/client/v1/messages": {
+      "get": {
+        "summary": "分页读取最近历史，按 ID 升序",
+        "security": [
+          {
+            "clientBearer": [],
+            "siteId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/History"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "凭证无效、过期或撤销",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "来源不允许",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "会话或图片不存在 / 无权限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过频繁，按 Retry-After 退避",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ]
+      },
+      "post": {
+        "summary": "发送消息；同一 clientId 重试幂等",
+        "security": [
+          {
+            "clientBearer": [],
+            "siteId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "message"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "const": true
+                    },
+                    "message": {
+                      "$ref": "#/components/schemas/Message"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "凭证无效、过期或撤销",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "来源不允许",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "会话或图片不存在 / 无权限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过频繁，按 Retry-After 退避",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/client/v1/images": {
+      "post": {
+        "summary": "上传一张最大 5 MB 的 PNG / JPEG / GIF / WebP，转换为静态 WebP",
+        "security": [
+          {
+            "clientBearer": [],
+            "siteId": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Media"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "凭证无效、过期或撤销",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "来源不允许",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "会话或图片不存在 / 无权限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过频繁，按 Retry-After 退避",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "image"
+                ],
+                "properties": {
+                  "image": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            },
+            "image/png": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/jpeg": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/gif": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/webp": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/client/v1/images/{mediaId}": {
+      "get": {
+        "summary": "读取所属会话图片",
+        "security": [
+          {
+            "clientBearer": [],
+            "siteId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "WebP 图片",
+            "content": {
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "凭证无效、过期或撤销",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "来源不允许",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "会话或图片不存在 / 无权限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过频繁，按 Retry-After 退避",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "mediaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/client/v1/context": {
+      "post": {
+        "summary": "更新客户端当前页面",
+        "security": [
+          {
+            "clientBearer": [],
+            "siteId": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "凭证无效、过期或撤销",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "来源不允许",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "会话或图片不存在 / 无权限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过频繁，按 Retry-After 退避",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务异常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "screen"
+                ],
+                "properties": {
+                  "screen": {
+                    "type": "string",
+                    "maxLength": 128
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "User": {
+        "type": "object",
+        "required": [
+          "userId",
+          "account"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "account": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "nickname": {
+            "type": "string",
+            "maxLength": 80,
+            "default": ""
+          },
+          "attributes": {
+            "type": "object",
+            "maxProperties": 5,
+            "propertyNames": {
+              "minLength": 1,
+              "maxLength": 32
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        }
+      },
+      "Client": {
+        "type": "object",
+        "required": [
+          "platform"
+        ],
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "Windows",
+              "macOS",
+              "Linux",
+              "Android",
+              "iOS",
+              "Other"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "device": {
+            "type": "string",
+            "maxLength": 80
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "Token": {
+        "type": "object",
+        "required": [
+          "token",
+          "expiresAt"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "integer",
+            "description": "UTC Unix 秒"
+          }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "required": [
+          "conversationId",
+          "accessToken",
+          "expiresAt",
+          "user",
+          "support",
+          "socket"
+        ],
+        "properties": {
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "accessToken": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "integer"
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          },
+          "support": {
+            "type": "object",
+            "properties": {
+              "supportName": {
+                "type": "string"
+              },
+              "avatarId": {
+                "type": "string"
+              },
+              "avatarUrl": {
+                "type": "string"
+              },
+              "online": {
+                "type": "boolean"
+              }
+            }
+          },
+          "socket": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "protocol": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "required": [
+          "id",
+          "conversation_id",
+          "sender",
+          "body",
+          "client_id",
+          "created_at",
+          "kind"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sender": {
+            "enum": [
+              "visitor",
+              "agent",
+              "auto"
+            ]
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "client_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix 毫秒"
+          },
+          "kind": {
+            "enum": [
+              "text",
+              "image",
+              "sticker"
+            ]
+          },
+          "media_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sticker_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "MessageInput": {
+        "type": "object",
+        "required": [
+          "clientId"
+        ],
+        "properties": {
+          "clientId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "enum": [
+              "text",
+              "image",
+              "sticker"
+            ],
+            "default": "text"
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "mediaId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stickerId": {
+            "type": "string"
+          }
+        },
+        "description": "text 正文必填；image mediaId 必填；sticker stickerId 必填。重试使用相同 clientId。"
+      },
+      "History": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "nextBefore": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      },
+      "Media": {
+        "type": "object",
+        "required": [
+          "id",
+          "width",
+          "height",
+          "bytes"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "width": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "bytes": {
+            "type": "integer"
+          }
+        }
+      },
+      "OK": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "backendKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "仅业务后端持有的站点64位签名密钥"
+      },
+      "clientBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "业务后端签发的短期客户端凭证"
+      },
+      "siteId": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Kivo-Site",
+        "description": "后台站点 UUID"
+      }
+    }
+  }
+}

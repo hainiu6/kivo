@@ -104,6 +104,8 @@ v1.9.0 新增独立 [访问统计模块](docs/traffic-analytics.md)：添加统�
 
 v1.9.1 放大访客端客服在线／离线状态提示，移除双方输入框的键盘提示文字，并提高新消息“叮”声的音量及辨识度，详见 [接待状态与提示音](docs/support-presence.md)。
 
+v1.10.0 新增 [桌面与手机客户端接入接口](docs/client-api.md)，支持用户资料传递、实时聊天与图片、短期凭证刷新 / 撤销、跨设备历史及 OpenAPI 文档。
+
 v1.9.2 更新本地国家数据库，修复 `179.255.146.39`、`179.255.158.39` 被旧库误识别为巴西的问题；客服与访问统计的历史地区显示随新库更新，无需删除记录。支持自定义 Country / City MMDB，详见 [IP 地区识别](docs/geolocation.md)。
 
 删除会同步到在线访客窗口及其他客服，并清理相关图片；完整会话删除后，访客可以开始新对话。详细行为与截图见 [记录管理](docs/history-management.md)。
@@ -126,6 +128,10 @@ bash /opt/kivo/scripts/upgrade.sh
 KIVO_VERSION=v1.1.0 bash /opt/kivo/scripts/upgrade.sh
 ```
 
+## 客户端接入
+
+Windows / macOS / Linux / Android / iOS 客户端可通过 [客户端接口文档](docs/client-api.md) 接入：业务后端签发短期凭证，客户端创建会话并传递用户 ID、账号、昵称及自定义资料。提供 HTTPS 聊天、图片、历史分页、退出撤销和 Socket.IO 实时协议，以及 [OpenAPI 定义](public/client-api.openapi.json) 和可运行示例。后台展示客户端平台、版本、设备及当前页面；同站点同用户跨设备恢复历史。
+
 ## 网站接入
 
 1. 登录后台，打开 **网站接入 → 添加网站**。
@@ -140,7 +146,7 @@ KIVO_VERSION=v1.1.0 bash /opt/kivo/scripts/upgrade.sh
 
 只需显示网站 Session 中的 `username` 时，按 [Session 直接显示说明](docs/session-name.md) 替换 PHP / Blade 嵌入代码，设置 `data-visitor-name`；读不到时显示默认访客，无需额外接口、路由或密钥。名称仅用于显示，聊天和图片权限仍由独立访客凭证控制。
 
-需要验证账号并跨设备恢复历史时，打开网站卡片的 **PHP 用户对接**，生成后端签名密钥，按 [签名身份接入说明](docs/php-integration.md) 配置。仓库提供普通 PHP 和针对 Laravel 5.4 的示例，由你自行复制到网站；密钥只保存在 PHP 后端。单页网站在 AJAX 登录、退出或切换账号成功后调用 `window.Kivo?.refreshIdentity()`。
+需要验证账号并跨设备恢复历史时，打开网站卡片的 **用户对接**，生成后端签名密钥，按 [签名身份接入说明](docs/php-integration.md) 配置。仓库提供普通 PHP 和针对 Laravel 5.4 的示例，由你自行复制到网站；密钥只保存在 PHP 后端。单页网站在 AJAX 登录、退出或切换账号成功后调用 `window.Kivo?.refreshIdentity()`。
 
 有 CSP 的网站请允许客服域名的 `script-src`、`frame-src` 和 `connect-src`，加载器内联样式也需相应的 `style-src` 许可。嵌入代码不包含管理员凭证。
 

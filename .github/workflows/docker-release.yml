@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag (e.g. v1.9.2); must be new'
+        description: 'Release tag (e.g. v1.10.0); must be new'
         required: true
-        default: v1.9.2
+        default: v1.10.0
   push:
     tags: ['v*']
 permissions:
@@ -65,5 +65,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '地区识别更新为 DB-IP 2026 年 10 月本地国家库，修复 179.255.146.39、179.255.158.39 被旧库误识别为巴西的问题；现在显示美国，不再附带错误的巴西城市。' '客服与访问统计的历史地区显示按当前库更新，无需清空记录，PV、UV 和消息保留。查询在本地完成，支持自定义 Country / City MMDB。' '通过 47 项测试，验证历史记录显示修正、自定义库回退及 IPv4 / IPv6；双架构镜像与 Debian 10 安装升级测试验证地区库及数据保留。' '执行 bash /opt/kivo/scripts/upgrade.sh 后强制刷新后台。' > release-notes.md
+          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '新增桌面与手机客户端 API：业务后端签发短期凭证，客户端传递用户 ID、账号、昵称和自定义资料；后台显示客户端平台、版本、设备和当前页面。' '支持 HTTP 聊天、图片、历史分页、退出撤销及 Socket.IO 实时消息；同站点同用户跨设备恢复历史。网站原有接入继续可用，密钥只保存在业务后端。' '提供中文接口文档、OpenAPI 3.1 定义、JavaScript 帮助类、实时连接示例和 PHP 后端适配示例。' '通过 50 项测试，验证凭证权限、跨设备隔离、聊天与图片、后台删除同步、凭证撤销及重启保留；双架构 Debian 10 容器测试验证客户端资料、消息和撤销记录升级保留。' '执行 bash /opt/kivo/scripts/upgrade.sh 后强制刷新后台，按 docs/client-api.md 接入客户端。' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md

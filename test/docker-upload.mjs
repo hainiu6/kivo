@@ -38,6 +38,14 @@ if (process.argv[2] !== 'verify') {
   const avatar = await upload('/api/admin/avatar', { Cookie: login.cookie });
   const { data: site } = await json('/api/admin/sites', { name: 'Docker 上传测试', origins: ['*'], avatarId: avatar.id }, login.cookie);
   const { data: identity } = await json(`/api/admin/sites/${site.id}/identity`, {action:'rotate'}, login.cookie);
+  const nativeResponse = await fetch(base + '/api/client/v1/tokens', { method:'POST', headers:{'Content-Type':'application/json',Authorization:'Bearer '+identity.secret}, body:JSON.stringify({siteId:site.id,user:{userId:'docker-native',account:'native@example.com',nickname:'容器客户端',attributes:{等级:'VIP'}}}) });
+  assert.equal(nativeResponse.status,201); const nativeProof=await nativeResponse.json();
+  const nativeSession=await fetch(base+'/api/client/v1/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({siteId:site.id,identityToken:nativeProof.token,client:{platform:'Android',version:'1.0'},screen:'账户'})});
+  assert.equal(nativeSession.status,200);
+  const nativeHeaders={'Content-Type':'application/json',Authorization:'Bearer '+nativeProof.token,'X-Kivo-Site':site.id};
+  assert.equal((await fetch(base+'/api/client/v1/messages',{method:'POST',headers:nativeHeaders,body:JSON.stringify({body:'客户端升级保留测试',clientId:randomUUID()})})).status,200);
+  const revoked=await(await fetch(base+'/api/client/v1/tokens',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+identity.secret},body:JSON.stringify({siteId:site.id,user:{userId:'docker-native',account:'native@example.com'}})})).json();
+  assert.equal((await fetch(base+'/api/client/v1/session',{method:'DELETE',headers:{Authorization:'Bearer '+revoked.token,'X-Kivo-Site':site.id}})).status,200);
   const payload=Buffer.from(JSON.stringify({siteId:site.id,userId:'docker-user',account:'docker@example.com',nickname:'容器测试用户',iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+900})).toString('base64url');
   const identityToken=payload+'.'+createHmac('sha256',identity.secret).update(payload).digest('base64url');
   const { data: account } = await json('/api/widget/session',{siteId:site.id,page:'https://shop.example/user',identityToken},'','https://shop.example');
@@ -56,6 +64,11 @@ if (process.argv[2] !== 'verify') {
   assert.equal((await fetch(base+`/api/admin/conversations/${disposable.conversationId}/messages`,{headers:{Cookie:login.cookie}})).status,404);
 }
 const db = new DatabaseSync('/app/data/kivo.sqlite', { readOnly: true });
+const native=db.prepare('SELECT * FROM website_users WHERE user_id=?').get('docker-native');
+assert.equal(JSON.parse(db.prepare('SELECT info FROM client_profiles WHERE conversation_id=?').get(native.conversation_id).info).platform,'Android','client profiles survive upgrade');
+assert.equal(JSON.parse(db.prepare('SELECT attributes FROM client_profiles WHERE conversation_id=?').get(native.conversation_id).attributes).等级,'VIP');
+assert.equal(db.prepare('SELECT body FROM messages WHERE conversation_id=?').get(native.conversation_id).body,'客户端升级保留测试');
+assert.equal(db.prepare('SELECT COUNT(*) AS n FROM client_revocations').get().n,1,'revocations survive upgrade');
 const tracking = db.prepare('SELECT id FROM analytics_sites WHERE name=?').get('Docker 访问统计测试');
 assert.equal(db.prepare('SELECT COUNT(*) AS n FROM page_views WHERE site_id=?').get(tracking.id).n, 2, 'analytics sites and visits survive upgrade');
 const trafficResponse = await fetch(base + '/api/admin/analytics/stats?site=' + tracking.id, { headers: { Cookie: login.cookie } });

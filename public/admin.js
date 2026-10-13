@@ -203,13 +203,17 @@ function renderDetails(c) {
   $('#chat-avatar').textContent=c.name.slice(-2);$('#visitor-avatar').textContent=c.name.slice(-2);$('#visitor-name').textContent=c.name;
   $('#visitor-name').title=c.name;
   $('#visitor-status').textContent=c.online?'● 在线':'● 离线';$('#visitor-status').classList.toggle('offline',!c.online);
-  $('#visitor-identity').textContent=c.user_id?'已验证的网站用户':c.visitor_name?'网站提供的名称':'匿名访客';$('#visitor-user-id').textContent=c.user_id||'—';$('#visitor-account').textContent=c.account||c.visitor_name||'—';$('#visitor-nickname').textContent=c.nickname||'—';
+  $('#visitor-identity').textContent=c.user_id?'已验证的用户':c.visitor_name?'网站提供的名称':'匿名访客';$('#visitor-user-id').textContent=c.user_id||'—';$('#visitor-account').textContent=c.account||c.visitor_name||'—';$('#visitor-nickname').textContent=c.nickname||'—';
   $('#visitor-user-id-field').hidden=!c.user_id;$('#visitor-account-field').hidden=!(c.account||c.visitor_name);$('#visitor-nickname-field').hidden=!c.nickname;
   $('#visitor-user-group').hidden=!(c.user_id||c.account||c.visitor_name||c.nickname);
+  const clientFacts=$('#visitor-client-facts');clientFacts.replaceChildren();$('#visitor-client-group').hidden=!c.client;
+  if(c.client){for(const [label,value] of [['平台',c.client.platform],['客户端版本',c.client.version],['设备',c.client.device],['当前页面',c.client.screen],...Object.entries(c.client.attributes||{})]){if(!value)continue;const row=element('div');row.append(element('dt','',label),element('dd','',value));clientFacts.append(row);}}
   $('#visitor-ip').textContent=c.ip;$('#visitor-region').textContent=c.region;$('#visitor-site').textContent=c.site_name;
   $('#visitor-os').textContent=c.os||'未知系统';$('#visitor-browser').textContent=c.browser||'未知浏览器';
+  $('#visitor-location-label').textContent='当前访问域名';
   $('#visitor-page').textContent=c.page;$('#visitor-page').href=c.page;$('#visitor-page').title=c.page;
-  try{const page=new URL(c.page);$('#visitor-domain').textContent=page.host;$('#visitor-domain').href=page.origin;$('#visitor-page').textContent=page.pathname+page.search+page.hash;}catch{$('#visitor-domain').textContent='未知域名';$('#visitor-domain').removeAttribute('href');}
+  if(c.client&&c.page===publicUrl+'/client'){$('#visitor-location-label').textContent='当前客户端页面';$('#visitor-domain').textContent=c.client.screen||'客服页面';$('#visitor-domain').removeAttribute('href');$('#visitor-page').textContent=c.client.platform+(c.client.version?' · '+c.client.version:'');$('#visitor-page').removeAttribute('href');}
+  else try{const page=new URL(c.page);$('#visitor-domain').textContent=page.host;$('#visitor-domain').href=page.origin;$('#visitor-page').textContent=page.pathname+page.search+page.hash;}catch{$('#visitor-domain').textContent='未知域名';$('#visitor-domain').removeAttribute('href');}
   $('#visitor-created').textContent=date(c.created_at);$('#visitor-updated').textContent=date(c.updated_at);
   $('#visitor-conversation-status').textContent=c.status==='closed'?'已结束':'进行中';
   $('#close-conversation').textContent=c.status==='closed'?'重新打开':'结束会话';$('#close-conversation').dataset.status=c.status;
@@ -289,18 +293,18 @@ function renderSites() {
     const copyCode=async value=>{code.value=value;try{await navigator.clipboard.writeText(value);toast('代码已复制，请放入对应网页模板');}catch{code.focus();code.select();toast('请按 Ctrl+C / ⌘C 复制选中的代码');}};
     const copy=element('button','button primary small','复制嵌入代码');copy.onclick=()=>copyCode(embedCode(s));
     const session=element('button','button secondary small','复制 PHP Session 代码');session.type='button';session.onclick=()=>copyCode(`<script src="${publicUrl}/widget.js" data-site="${s.id}" data-visitor-name="{{ Session::get('user.username', Session::get('username', '')) }}" async></script>`);
-    const demo=element('a','text-link','打开测试页面 ↗');demo.href=`/demo?site=${encodeURIComponent(s.id)}`;demo.target='_blank';demo.rel='noopener';const identity=element('button','button secondary small','PHP 用户对接');identity.type='button';identity.onclick=()=>openIdentity(s);actions.append(copy,demo,identity);
+    const demo=element('a','text-link','打开测试页面 ↗');demo.href=`/demo?site=${encodeURIComponent(s.id)}`;demo.target='_blank';demo.rel='noopener';const identity=element('button','button secondary small','用户对接');identity.type='button';identity.onclick=()=>openIdentity(s);actions.append(copy,demo,identity);
     actions.append(session);card.append(header,origins,element('p','',s.greeting),code,actions);list.append(card);
   });
 }
 let identitySiteId, identityRevision=0;
 function renderIdentity(data) {
-  $('#identity-status').textContent=data.enabled?'已启用：将网站 ID 和密钥填入 PHP 后端配置。':'尚未启用：先生成密钥，再配置 PHP 登录状态接口。';
+  $('#identity-status').textContent=data.enabled?'已启用：将站点 ID 和密钥填入业务后端配置。':'尚未启用：先生成密钥，再按网站或客户端文档接入。';
   $('#identity-site-id').value=data.siteId;$('#identity-secret').value=data.secret;$('#identity-secret').type='password';$('#identity-show').textContent='显示密钥';
   $('#identity-rotate').textContent=data.enabled?'重置密钥':'生成密钥';$('#identity-disable').disabled=!data.enabled;$('#identity-copy').disabled=!data.enabled;
 }
 async function openIdentity(s) {
-  identitySiteId=s.id;const revision=++identityRevision;$('#identity-title').textContent=s.name+' · PHP 用户对接';$('#identity-error').textContent='';$('#identity-secret').value='';$('#identity-site-id').value=s.id;
+  identitySiteId=s.id;const revision=++identityRevision;$('#identity-title').textContent=s.name+' · 用户对接';$('#identity-error').textContent='';$('#identity-secret').value='';$('#identity-site-id').value=s.id;
   $('#identity-code').value=`<script src="${publicUrl}/widget.js" data-site="${s.id}" data-identity-url="/kivo/identity" async></script>`;
   $('#identity-status').textContent='正在读取配置…';$('#identity-rotate').disabled=true;$('#identity-disable').disabled=true;$('#identity-copy').disabled=true;$('#identity-dialog').showModal();
   try {const data=await api(`/api/admin/sites/${s.id}/identity`);if(revision===identityRevision){renderIdentity(data);$('#identity-rotate').disabled=false;}}catch(e){if(revision===identityRevision)$('#identity-error').textContent=e.message;}

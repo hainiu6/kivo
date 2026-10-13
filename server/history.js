@@ -36,7 +36,7 @@ export function registerHistoryRoutes(app, { db, dataDir, io, conversation, upda
       for (const { id } of rows) {
         mediaIds.push(...db.prepare('SELECT id FROM media WHERE conversation_id=?').all(id).map(m => m.id));
         // Delete dependent rows first; avatar media and site configuration stay intact.
-        for (const table of ['messages', 'media', 'auto_reply_state', 'visitor_devices', 'website_users', 'visitor_labels']) db.prepare(`DELETE FROM ${table} WHERE conversation_id=?`).run(id);
+        for (const table of ['messages', 'media', 'auto_reply_state', 'visitor_devices', 'website_users', 'visitor_labels', 'client_profiles']) db.prepare(`DELETE FROM ${table} WHERE conversation_id=?`).run(id);
         db.prepare('DELETE FROM conversations WHERE id=?').run(id);
       }
     });

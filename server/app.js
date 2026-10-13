@@ -17,6 +17,7 @@ import { registerHistoryRoutes } from './history.js';
 import { visitorIP } from './ip.js';
 import { registerStatsRoutes } from './stats.js';
 import { registerAnalyticsRoutes } from './analytics.js';
+import { registerClientRoutes } from './client-api.js';
 
 const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -97,7 +98,7 @@ export function createKivo(options = {}) {
   const io = new Server(server, {
     maxHttpBufferSize: 16384,
     cors: { origin: (origin, cb) => cb(null, !origin || isKnownOrigin(origin)), credentials: true },
-    allowRequest: (req, cb) => cb(null, isKnownOrigin(socketOrigin(req)))
+    allowRequest: (req, cb) => cb(null, (!req.headers.origin && !req.headers.referer) || isKnownOrigin(socketOrigin(req)))
   });
   const visitors = new Map();
   const admins = new Set();
@@ -118,7 +119,8 @@ export function createKivo(options = {}) {
   const regionOf = createRegionLookup({ dataDir });
   const conversation = id => {
     const c = db.prepare(`SELECT c.*, s.name AS site_name, COALESCE(d.os,'未知系统') AS os, COALESCE(d.browser,'未知浏览器') AS browser, u.user_id,u.account,u.nickname,l.name AS visitor_name, (SELECT CASE kind WHEN 'image' THEN '[图片] ' || body WHEN 'sticker' THEN '[动态表情]' ELSE body END FROM messages WHERE conversation_id=c.id ORDER BY id DESC LIMIT 1) AS last_message FROM conversations c JOIN sites s ON c.site_id=s.id LEFT JOIN visitor_devices d ON d.conversation_id=c.id LEFT JOIN website_users u ON u.conversation_id=c.id LEFT JOIN visitor_labels l ON l.conversation_id=c.id WHERE c.id=?`).get(id);
-    return c ? { ...c, region: regionOf(c.ip), visitor_hash: undefined, online: (visitors.get(id)?.size || 0) > 0 } : null;
+    const profile = c && db.prepare('SELECT info,attributes FROM client_profiles WHERE conversation_id=?').get(c.id);
+    return c ? { ...c, client: profile ? { ...JSON.parse(profile.info), attributes: JSON.parse(profile.attributes) } : null, region: regionOf(c.ip), visitor_hash: undefined, online: (visitors.get(id)?.size || 0) > 0 } : null;
   };
   const updateConversation = id => io.to('admins').emit('conversation:update', conversation(id));
   const messages = (id, before) => {
@@ -178,6 +180,7 @@ export function createKivo(options = {}) {
     if (validToken(raw)) return anonymousVisitor(siteId, raw);
     try {
       const identity = verifyIdentity(raw, siteId, identitySecret(siteId));
+      if (identity.client && db.prepare('SELECT 1 FROM client_revocations WHERE token_hash=?').get(hash(raw))) return null;
       return db.prepare('SELECT conversation_id AS id,site_id FROM website_users WHERE site_id=? AND user_id=?').get(siteId, identity.userId) || null;
     } catch { return null; }
   };
@@ -375,12 +378,14 @@ export function createKivo(options = {}) {
     let identity = null;
     const visitorName = text(req.body?.visitorName,128).replace(/[\u0000-\u001f\u007f]/g,'').trim();
     if (req.body?.identityToken != null) {
-      try { identity = verifyIdentity(req.body.identityToken, site.id, identitySecret(site.id)); }
+      try { identity = verifyIdentity(req.body.identityToken, site.id, identitySecret(site.id)); if (identity.client) throw new Error('客户端凭证请使用 /api/client/v1/sessions'); }
       catch (e) { return res.status(403).json({ error: e.message }); }
     }
     const raw = identity ? req.body.identityToken : validToken(req.body?.visitorToken) && !db.prepare('SELECT conversation_id FROM website_users WHERE site_id=? AND conversation_id IN (SELECT id FROM conversations WHERE visitor_hash=?)').get(site.id,hash(req.body.visitorToken)) ? req.body.visitorToken : token();
+    res.json(openSession({site, identity, raw, ip:ipOf(req), page, visitorName, ua:req.headers['user-agent']}));
+  });
+  function openSession({site, identity, raw, ip, page, visitorName, ua}) {
     let c = identity ? db.prepare('SELECT conversation_id AS id FROM website_users WHERE site_id=? AND user_id=?').get(site.id,identity.userId) : anonymousVisitor(site.id,raw);
-    const ip = ipOf(req);
     db.exec('BEGIN IMMEDIATE');
     try {
       if (!c) {
@@ -396,11 +401,12 @@ export function createKivo(options = {}) {
       }
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
-    const device = deviceInfo(req.headers['user-agent']);
+    const device = deviceInfo(ua);
     db.prepare('INSERT INTO visitor_devices VALUES(?,?,?,?) ON CONFLICT(conversation_id) DO UPDATE SET os=excluded.os,browser=excluded.browser,ua=excluded.ua').run(c.id, device.os, device.browser, device.ua);
     updateConversation(c.id);
-    res.json({ visitorToken: raw, conversationId: c.id, identity: identity ? {userId:identity.userId,account:identity.account,nickname:identity.nickname,verified:true} : null, site: { id: site.id, name: site.name, color: site.color, greeting: site.greeting, ...siteProfile(site.id) } });
-  });
+    return { visitorToken: raw, conversationId: c.id, identity: identity ? {userId:identity.userId,account:identity.account,nickname:identity.nickname,verified:true} : null, site: { id: site.id, name: site.name, color: site.color, greeting: site.greeting, ...siteProfile(site.id) } };
+  }
+  const clientApi = registerClientRoutes(app, { db, io, dataDir, publicOrigin, siteById, siteAllows, identitySecret, resolveVisitor, openSession, siteProfile, agentsOnline, saveMessage, imageLimiter, imageBody, upload, ipOf, regionOf, visitors, updateConversation, publishPresence, isKnownOrigin });
   io.use((socket, next) => {
     const auth = socket.handshake.auth || {};
     if (auth.role === 'admin') {
@@ -410,7 +416,9 @@ export function createKivo(options = {}) {
       socket.data.role = 'admin'; socket.data.userId = user.id; socket.data.sessionHash = hash(cookieToken(socket.request));
     } else {
       if (!uuid(auth.siteId)) return next(new Error('访客凭证无效'));
-      if (!siteAllows(siteById(auth.siteId), socketOrigin(socket.request))) return next(new Error('来源无效'));
+      const native = !socket.request.headers.origin && !socket.request.headers.referer;
+      if (native) { try { clientApi.validIdentity(auth.visitorToken, auth.siteId); } catch { return next(new Error('客户端凭证无效')); } }
+      else if (!siteAllows(siteById(auth.siteId), socketOrigin(socket.request))) return next(new Error('来源无效'));
       const c = resolveVisitor(auth.siteId,auth.visitorToken);
       if (!c) return next(new Error('访客凭证无效'));
       socket.data.role = 'visitor'; socket.data.conversationId = c.id; socket.data.siteId = auth.siteId; socket.data.visitorToken = auth.visitorToken;
@@ -438,7 +446,7 @@ export function createKivo(options = {}) {
       db.prepare('UPDATE conversations SET ip=?,region=? WHERE id=?').run(ip,regionOf(ip),id);
       socket.join(`conversation:${id}`);
       if (!visitors.has(id)) visitors.set(id, new Set());
-      visitors.get(id).add(socket.id); updateConversation(id);
+      visitors.get(id).add(socket.id); clientApi.releaseLease(socket.data.visitorToken, id); updateConversation(id);
       publishPresence();
       socket.emit('history', messages(id)); socket.emit('agents:status', { online: agentsOnline() });
     }
@@ -490,5 +498,5 @@ export function createKivo(options = {}) {
   app.use(express.static(publicDir, { index: 'index.html', maxAge: 0 }));
   app.use('/api', (_req,res) => res.status(404).json({ error: '接口不存在' }));
   app.use((err, _req, res, _next) => { console.error(err.message); res.status(err.status || 500).json({ error: err.status === 413 ? '请求内容过大' : '请求失败，请稍后再试' }); });
-  return { app, server, db, io, close: async () => { clearInterval(cleanup); await new Promise(resolve => io.close(resolve)); db.close(); } };
+  return { app, server, db, io, close: async () => { clearInterval(cleanup); clientApi.close(); await new Promise(resolve => io.close(resolve)); db.close(); } };
 }
