@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag (e.g. v1.12.0); must be new'
+        description: 'Release tag (e.g. v1.12.1); must be new'
         required: true
-        default: v1.12.0
+        default: v1.12.1
   push:
     tags: ['v*']
 permissions:
@@ -65,5 +65,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '移除左侧「让对话发生」引导卡片；右侧访客信息新增备注，支持保存、修改、清空和多客服实时同步。' '备注仅客服可见；刷新、重启及升级后保留。切换会话保留未保存草稿，其他客服同时修改时提示载入最新备注，防止覆盖。清空聊天记录保留备注，删除整条会话一并删除备注。' '通过 66 项测试，覆盖备注权限、访客隔离、持久化、并发修改与异步切换；双架构 Debian 10 测试验证安装、备份、升级和回滚。' '执行 bash /opt/kivo/scripts/upgrade.sh 后刷新后台，详见 docs/visitor-inspector.md。' > release-notes.md
+          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '项目迁移到 hainiu3/Kivo：安装器、升级下载、后台项目链接和接口文档全部使用新仓库。保留原项目全部代码、历史提交与版本标签。' '旧 Docker 镜像版首次切换执行：KIVO_RELEASE_BASE=https://github.com/hainiu3/Kivo/releases bash /opt/kivo/scripts/upgrade.sh。成功后继续使用常规升级命令。配置、账号、聊天记录、图片和访客备注保留。' '通过应用测试及双架构 Debian 10 安装、备份、升级和回滚验证。迁移说明见 README 的一键升级章节。' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md

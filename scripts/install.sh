@@ -6,7 +6,7 @@ ROOT="${KIVO_INSTALL_DIR:-/opt/kivo}"
 [[ $EUID -eq 0 ]] || { echo '请在 root 终端运行，或使用 sudo bash。' >&2; exit 1; }
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-SCRIPT_BASE="${KIVO_SCRIPT_BASE:-https://raw.githubusercontent.com/panhui/Kivo/main/scripts}"
+SCRIPT_BASE="${KIVO_SCRIPT_BASE:-https://raw.githubusercontent.com/hainiu3/Kivo/main/scripts}"
 curl -fsSL --retry 3 "$SCRIPT_BASE/lib-docker.sh" -o "$WORK/lib-docker.sh"
 . "$WORK/lib-docker.sh"
 kivo_host_check
