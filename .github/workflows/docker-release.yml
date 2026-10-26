@@ -65,5 +65,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '项目迁移到 hainiu3/Kivo：安装器、升级下载、后台项目链接和接口文档全部使用新仓库。保留原项目全部代码、历史提交与版本标签。' '旧 Docker 镜像版首次切换执行：KIVO_RELEASE_BASE=https://github.com/hainiu3/Kivo/releases bash /opt/kivo/scripts/upgrade.sh。成功后继续使用常规升级命令。配置、账号、聊天记录、图片和访客备注保留。' '通过应用测试及双架构 Debian 10 安装、备份、升级和回滚验证。迁移说明见 README 的一键升级章节。' > release-notes.md
+          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '项目迁移到 hainiu3/Kivo：安装器、升级下载、后台项目链接和接口文档全部使用新仓库。保留原项目全部代码、历史提交与版本标签。同时更新 multer、body-parser 和 ip-address，修复依赖检查发现的 3 项漏洞。' '旧 Docker 镜像版首次切换执行：KIVO_RELEASE_BASE=https://github.com/hainiu3/Kivo/releases bash /opt/kivo/scripts/upgrade.sh。成功后继续使用常规升级命令。配置、账号、聊天记录、图片和访客备注保留。' '通过应用测试及双架构 Debian 10 安装、备份、升级和回滚验证。迁移说明见 README 的一键升级章节。' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md
