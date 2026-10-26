@@ -18,6 +18,7 @@ import { registerVisitorNoteRoutes } from './visitor-notes.js';
 import { visitorIP } from './ip.js';
 import { registerStatsRoutes } from './stats.js';
 import { registerAnalyticsRoutes } from './analytics.js';
+import { registerCustomNodeRoutes } from './custom-nodes.js';
 import { registerClientRoutes } from './client-api.js';
 import { conversationLifecycle } from './conversation-lifecycle.js';
 
@@ -241,6 +242,7 @@ export function createKivo(options = {}) {
   registerStatsRoutes(app, { db, visitors });
   app.use('/api/admin', (req, res, next) => ['GET', 'HEAD'].includes(req.method) ? next() : sameOrigin(req, res, next));
   registerAnalyticsRoutes(app, { db, ipOf, regionOf });
+  registerCustomNodeRoutes(app, { db, io });
   app.post('/api/admin/avatar', imageLimiter, imageBody, upload('avatar'));
   app.post('/api/admin/conversations/:id/images', (req, res, next) => {
     if (!uuid(req.params.id) || !conversation(req.params.id)) return res.status(404).json({ error: '会话不存在' });

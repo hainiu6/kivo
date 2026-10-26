@@ -1,10 +1,10 @@
 (() => {
   const key = 'kivo.admin.workspace';
-  const defaults = () => ({ view: 'inbox', status: 'open', site: '', query: '', conversation: '', draft: '', statsDays:7, statsSite:'', analyticsDays:7, analyticsSite:'', analyticsTab:'pages' });
+  const defaults = () => ({ view: 'inbox', status: 'open', site: '', query: '', conversation: '', draft: '', statsDays:7, statsSite:'', analyticsDays:7, analyticsSite:'', analyticsTab:'pages', nodeQuery:'' });
   function clean(state) {
     const result = defaults();
     if (!state || typeof state !== 'object') return result;
-    if (['inbox','sites','replies','stats','analytics','settings'].includes(state.view)) result.view = state.view;
+    if (['inbox','sites','replies','stats','analytics','nodes','settings'].includes(state.view)) result.view = state.view;
     if ([1,7,30,90].includes(state.statsDays)) result.statsDays=state.statsDays;
     if(typeof state.statsSite==='string'&&/^[\da-f-]{36}$/i.test(state.statsSite))result.statsSite=state.statsSite;
     if (['open','closed',''].includes(state.status)) result.status = state.status;
@@ -12,6 +12,7 @@
     if([1,7,30,90].includes(state.analyticsDays))result.analyticsDays=state.analyticsDays;
     if(typeof state.analyticsSite==='string'&&/^[\da-f-]{36}$/i.test(state.analyticsSite))result.analyticsSite=state.analyticsSite;
     if(['pages','visitors','domains','sources'].includes(state.analyticsTab))result.analyticsTab=state.analyticsTab;
+    if (typeof state.nodeQuery === 'string') result.nodeQuery = state.nodeQuery.slice(0,100);
     if (typeof state.query === 'string') result.query = state.query.slice(0,100);
     if (typeof state.draft === 'string' && result.conversation) result.draft = state.draft.slice(0,4000);
     return result;

@@ -1,4 +1,4 @@
-/* global io, KivoChat, KivoNotifications, KivoWorkspaceState, KivoStats, KivoAnalytics, KivoVisitorNotes */
+/* global io, KivoChat, KivoNotifications, KivoWorkspaceState, KivoStats, KivoAnalytics, KivoVisitorNotes, KivoCustomNodes */
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 let socket, publicUrl, sites = [], conversations = [], activeId = null, activeMessages = [], status = 'open', view = 'inbox', selectionRevision = 0, listRevision = 0;
@@ -43,6 +43,7 @@ const notifications = KivoNotifications.create({button:$('#notification-sound'),
 }});
 const visitorNotes = KivoVisitorNotes.create({api,form:$('#visitor-note-form'),input:$('#visitor-note-input'),saveButton:$('#visitor-note-save'),status:$('#visitor-note-status'),count:$('#visitor-note-count'),reloadButton:$('#visitor-note-reload')});
 const stats = KivoStats.create({api,onChange:()=>rememberWorkspace()});
+const customNodes = KivoCustomNodes.create({api,onChange:()=>rememberWorkspace(),onMessage:toast});
 const analytics = KivoAnalytics.create({api,publicUrl:()=>publicUrl,onChange:()=>rememberWorkspace(),onMessage:toast});
 function setSidebar(collapsed) {
   $('#workspace').classList.toggle('sidebar-collapsed',collapsed);
@@ -67,17 +68,17 @@ async function api(url, options = {}) {
   return data;
 }
 const post = (url, data = {}) => api(url,{method:'POST',body:JSON.stringify(data)});
-function showLogin() { presenceRevision++; authenticated=false;accountUsername='';KivoWorkspaceState.clear();view='inbox';status='open';selectionRevision++;listRevision++;loadingMessages=false;drafts.clear();$('#loading-screen').hidden=true; stats.reset();analytics.reset();visitorNotes.reset();notifications.reset(); $('#delete-dialog').close(); $('#identity-dialog').close(); $('#identity-secret').value=''; $('#site-dialog').close(); socket?.disconnect(); composer.destroy(); KivoChat.clearImages(); $('#workspace').hidden = true; $('#login-screen').hidden = false; activeId = null; $('#chat-empty').hidden = false; $('#chat-active').hidden = true; $('#visitor-empty').hidden = false; $('#visitor-details').hidden = true; }
-function rememberWorkspace() { if(authenticated)KivoWorkspaceState.save(accountUsername,{view,status,site:$('#site-filter').value,query:$('#search').value,conversation:activeId||'',draft:$('#message-input').value,...stats.getFilters(),...analytics.getFilters()}); }
+function showLogin() { presenceRevision++; authenticated=false;accountUsername='';KivoWorkspaceState.clear();view='inbox';status='open';selectionRevision++;listRevision++;loadingMessages=false;drafts.clear();$('#loading-screen').hidden=true; stats.reset();analytics.reset();customNodes.reset();visitorNotes.reset();notifications.reset(); $('#delete-dialog').close(); $('#identity-dialog').close(); $('#identity-secret').value=''; $('#site-dialog').close(); socket?.disconnect(); composer.destroy(); KivoChat.clearImages(); $('#workspace').hidden = true; $('#login-screen').hidden = false; activeId = null; $('#chat-empty').hidden = false; $('#chat-active').hidden = true; $('#visitor-empty').hidden = false; $('#visitor-details').hidden = true; }
+function rememberWorkspace() { if(authenticated)KivoWorkspaceState.save(accountUsername,{view,status,site:$('#site-filter').value,query:$('#search').value,conversation:activeId||'',draft:$('#message-input').value,...stats.getFilters(),...analytics.getFilters(),...customNodes.getFilters()}); }
 function switchView(next,load=true) {
-  view = next; ['inbox','sites','replies','stats','analytics','settings'].forEach(v => $(`#view-${v}`).hidden = v !== next);
+  view = next; ['inbox','sites','replies','stats','analytics','nodes','settings'].forEach(v => $(`#view-${v}`).hidden = v !== next);
   $('#workspace').classList.toggle('inbox-mode', next === 'inbox');
   $$('.nav-button').forEach(b => b.classList.toggle('active',b.dataset.view === next));
-  $('#page-label').textContent = {inbox:'会话收件箱',sites:'网站接入',replies:'回复设置',stats:'数据统计',analytics:'访问统计',settings:'账号设置'}[next];
+  $('#page-label').textContent = {inbox:'会话收件箱',sites:'网站接入',replies:'回复设置',stats:'数据统计',analytics:'访问统计',nodes:'定制节点',settings:'账号设置'}[next];
   if(window.matchMedia('(max-width:850px)').matches)setSidebar(true);
   if(load)rememberWorkspace();
   if (next === 'inbox'&&load) loadConversations().catch(e => toast(e.message));
-  if(load){if(next==='stats')stats.activate();else stats.deactivate();if(next==='analytics')analytics.activate();else analytics.deactivate();}
+  if(load){if(next==='stats')stats.activate();else stats.deactivate();if(next==='analytics')analytics.activate();else analytics.deactivate();if(next==='nodes')customNodes.activate();else customNodes.deactivate();}
 }
 async function start() {
   const me = await api('/api/admin/me'); publicUrl = me.publicUrl;
@@ -89,14 +90,15 @@ async function start() {
   switchView(view,false);$('#loading-screen').hidden=true;$('#login-screen').hidden=true;$('#workspace').hidden=false;
   $('#account-name').textContent = me.username; $('#service-url').textContent = publicUrl;
   $('#today').textContent = new Date().toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'});
-  await loadSites();$('#site-filter').value=sites.some(s=>s.id===saved.site)?saved.site:'';stats.setFilters(saved);analytics.setFilters(saved);
+  await loadSites();$('#site-filter').value=sites.some(s=>s.id===saved.site)?saved.site:'';customNodes.setFilters(saved);stats.setFilters(saved);analytics.setFilters(saved);
   await loadConversations(); await loadReplies();
   $('#login-screen').hidden = true; $('#workspace').hidden = false;
   notifications.start();
-  if(view==='stats')stats.activate();if(view==='analytics')analytics.activate();
+  if(view==='stats')stats.activate();if(view==='analytics')analytics.activate();if(view==='nodes')customNodes.activate();
   socket?.disconnect(); socket = io({ auth:{role:'admin'}, reconnection:true });
   socket.on('connect', () => {
     visitorNotes.refresh();
+    customNodes.refresh();
     notifications.refresh();
     stats.schedule();
     refreshPresence();
@@ -108,6 +110,7 @@ async function start() {
   socket.on('connect_error', e => { $('#connection-label').textContent = '正在重新连接'; $('#connection-dot').classList.add('offline'); $('#send-message').disabled = true; if (e.message === '登录已过期') showLogin(); });
   socket.on('presence:update', applyPresence);
   socket.on('conversation:note', visitorNotes.receive);
+  socket.on('custom-nodes:update', customNodes.refresh);
   socket.on('conversation:update', c => {
     notifications.refresh();
     stats.schedule();

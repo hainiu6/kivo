@@ -33,3 +33,13 @@ test('site creation selects the new site and exposes code; empty and failed anal
   assert.equal(h.analytics.getFilters().analyticsSite,site);assert.equal(h.get('#analytics-site-list').children.length,1);assert.equal(h.get('#analytics-site-dialog').open,false);assert.equal(h.get('#analytics-error').textContent,'');
   h.get('#analytics-pages-next').onclick();h.requests[5].resolve(data(3));await flush();assert.equal(h.get('#analytics-cards').children[0].children[1].textContent,'3');
 });
+
+test('daily chart exposes immediate PV/UV values, exact dates and keyboard/touch focus including zero traffic days',async()=>{
+  const h=harness();h.analytics.activate();h.requests[0].resolve([]);await flush();
+  const stats=data(12345);stats.daily.push({date:'2026-10-13',pv:0,uv:0});h.requests[1].resolve(stats);await flush();
+  const columns=h.get('#analytics-trend').children;assert.equal(columns.length,2);
+  for(const column of columns)assert.equal(column.tabIndex,0);
+  assert.equal(columns[0].children[2].children[0].textContent,'2026-10-12');assert.match(columns[0].children[2].children[1].textContent,/12,345/);assert.match(columns[0].children[2].children[2].textContent,/UV  1/);
+  assert.equal(columns[1].children[2].children[1].textContent,'浏览量 PV  0');assert.equal(columns[1].children[2].children[2].textContent,'访客数 UV  0');
+  columns[0].onclick();
+});

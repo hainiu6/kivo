@@ -21,6 +21,7 @@ const json = async (route, body, cookie = '', requestOrigin = origin) => {
 };
 const login = await json('/api/login', { username: process.env.ADMIN_USERNAME || 'admin', password: process.env.ADMIN_PASSWORD });
 if (process.argv[2] !== 'verify') {
+  await json('/api/admin/custom-nodes', { account:'docker-node-account',nodeNumber:'DEPLOY-001',startsAt:Date.now(),endsAt:Date.now()+86400000,note:'备份与升级保留测试',node:'docker节点\n'.repeat(6000) }, login.cookie);
   const { data: tracking } = await json('/api/admin/analytics/sites', { name: 'Docker 访问统计测试' }, login.cookie);
   const browserId = randomUUID();
   for (const page of ['https://any-domain.example/', 'https://another-domain.example/products']) {
@@ -72,6 +73,10 @@ if (process.argv[2] !== 'verify') {
   assert.equal((await fetch(base+`/api/admin/conversations/${disposable.conversationId}/messages`,{headers:{Cookie:login.cookie}})).status,404);
 }
 const db = new DatabaseSync('/app/data/kivo.sqlite', { readOnly: true });
+const customNode=db.prepare('SELECT * FROM custom_nodes WHERE account=?').get('docker-node-account');
+assert.equal(customNode.note,'备份与升级保留测试');assert.equal(customNode.node_text,'docker节点\n'.repeat(6000),'long custom node content survives upgrade');
+const customResponse=await fetch(base+'/api/admin/custom-nodes/'+customNode.id,{headers:{Cookie:login.cookie}});
+assert.equal(customResponse.status,200);assert.equal((await customResponse.json()).node,customNode.node_text);
 const native=db.prepare('SELECT * FROM website_users WHERE user_id=?').get('docker-native');
 assert.equal(JSON.parse(db.prepare('SELECT info FROM client_profiles WHERE conversation_id=?').get(native.conversation_id).info).platform,'Android','client profiles survive upgrade');
 assert.equal(JSON.parse(db.prepare('SELECT attributes FROM client_profiles WHERE conversation_id=?').get(native.conversation_id).attributes).等级,'VIP');
@@ -105,4 +110,4 @@ for (const item of media) {
   assert.deepEqual(downloaded, await readFile('/app/data/media/' + item.id + '.webp'));
 }
 db.close();
-console.log('Container private notes, analytics persistence, uploads, history deletion, account identity, authentication and persisted media passed.');
+console.log('Container custom nodes, private notes, analytics persistence, uploads, history deletion, account identity, authentication and persisted media passed.');
