@@ -159,7 +159,7 @@ bash /opt/kivo/scripts/upgrade.sh
 指定已发布版本：
 
 ```bash
-KIVO_VERSION=v1.12.1 bash /opt/kivo/scripts/upgrade.sh
+KIVO_VERSION=v1.13.1 bash /opt/kivo/scripts/upgrade.sh
 ```
 
 ## 客户端接入
