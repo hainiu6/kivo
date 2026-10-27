@@ -121,7 +121,7 @@ kivo_run() {
 }
 kivo_fetch_bundle() {
   local work="$1" version arch base asset digest
-  base="${KIVO_RELEASE_BASE:-https://github.com/hainiu3/Kivo/releases}"
+  base="${KIVO_RELEASE_BASE:-https://github.com/hainiu6/kivo/releases}"
   version="${KIVO_VERSION:-}"
   [[ -n "$version" ]] || version="$(curl -fsSL --retry 3 --connect-timeout 15 "$base/latest/download/version.txt")"
   [[ "$version" =~ ^v[0-9][a-zA-Z0-9._-]*$ ]] || kivo_error '无法获取有效的发行版本。'

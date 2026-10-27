@@ -42,7 +42,7 @@ bash /opt/kivo/scripts/upgrade.sh
 如果服务器仍使用旧仓库下载地址，首次切换执行：
 
 ```bash
-KIVO_RELEASE_BASE=https://github.com/hainiu3/Kivo/releases bash /opt/kivo/scripts/upgrade.sh
+KIVO_RELEASE_BASE=https://github.com/hainiu6/kivo/releases bash /opt/kivo/scripts/upgrade.sh
 ```
 
 成功后刷新后台。

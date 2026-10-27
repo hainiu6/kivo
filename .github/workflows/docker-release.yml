@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag (e.g. v1.13.0); must be new'
+        description: 'Release tag (e.g. v1.13.1); must be new'
         required: true
-        default: v1.13.0
+        default: v1.13.1
   push:
     tags: ['v*']
 permissions:
@@ -65,5 +65,5 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           printf '%s\n' "$VERSION" > version.txt
-          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '访问统计：悬停每日趋势柱形图立即显示该日日期、PV 和 UV；支持键盘聚焦及触屏点击。' '新增定制节点页面：弹窗添加和编辑账号、节点编号、开始时间、结束时间、备注、长文本节点；支持搜索与分页。时间按北京时间填写，多客服并发修改时保护未保存内容。' '通过 73 项测试及双架构 Debian 10 安装、备份、升级、回滚验证，包含长文本节点升级保留。' '升级：bash /opt/kivo/scripts/upgrade.sh。若仍为旧仓库安装，首次执行 KIVO_RELEASE_BASE=https://github.com/hainiu3/Kivo/releases bash /opt/kivo/scripts/upgrade.sh。刷新后台后使用，详见 docs/custom-nodes.md。' > release-notes.md
+          printf '%s\n\n' 'Docker 镜像版：Debian 10 / 11 / 12 / 13，amd64 / arm64，默认端口 8088。' '项目迁移到 hainiu6/kivo；保留完整代码、历史提交及原有版本标签，安装器、升级下载、后台文档链接均改为新仓库。包含 v1.13.0 的定制节点、PV/UV 提示及此前全部功能。' '旧服务器首次切换：KIVO_RELEASE_BASE=https://github.com/hainiu6/kivo/releases bash /opt/kivo/scripts/upgrade.sh。成功后继续使用常规升级命令，配置与业务数据保留。' '通过应用测试和双架构 Debian 10 安装、备份、升级、回滚验证。具体迁移步骤见 README 的一键升级章节。' > release-notes.md
           gh release create "$VERSION" kivo-linux-*.tar.gz SHA256SUMS version.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Kivo $VERSION · Docker 镜像安装版" --notes-file release-notes.md

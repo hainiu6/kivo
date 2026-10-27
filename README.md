@@ -26,7 +26,7 @@
 在 root 终端执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hainiu3/Kivo/main/scripts/install.sh -o /tmp/kivo-install.sh && bash /tmp/kivo-install.sh
+curl -fsSL https://raw.githubusercontent.com/hainiu6/kivo/main/scripts/install.sh -o /tmp/kivo-install.sh && bash /tmp/kivo-install.sh
 ```
 
 普通账号请使用 `sudo bash /tmp/kivo-install.sh`。安装包已包含镜像，服务器**无需 Git、npm、Node.js、MariaDB 或 Docker Compose**。安装器不调用 apt / dpkg；截图中的 MariaDB 软件包错误不会阻挡此安装。
@@ -130,12 +130,12 @@ v1.9.2 更新本地国家数据库，修复 `179.255.146.39`、`179.255.158.39` 
 
 ## 一键升级
 
-项目已迁移到 [hainiu3/Kivo](https://github.com/hainiu3/Kivo)。新安装和 v1.12.1 起的安装包默认使用新仓库。
+项目已迁移到 [hainiu6/kivo](https://github.com/hainiu6/kivo)。新安装和 v1.13.1 起的安装包默认使用新仓库。
 
 **此前从旧仓库安装的 Docker 镜像版，首次切换请执行：**
 
 ```bash
-KIVO_RELEASE_BASE=https://github.com/hainiu3/Kivo/releases bash /opt/kivo/scripts/upgrade.sh
+KIVO_RELEASE_BASE=https://github.com/hainiu6/kivo/releases bash /opt/kivo/scripts/upgrade.sh
 ```
 
 成功后，后续使用下面的常规升级命令即可。此次切换保留现有 `.env`、数据、账号、图片和访客备注。
@@ -143,7 +143,7 @@ KIVO_RELEASE_BASE=https://github.com/hainiu3/Kivo/releases bash /opt/kivo/script
 旧版 Git / Compose 部署请先修改仓库地址，再执行原升级脚本：
 
 ```bash
-git -C /opt/kivo remote set-url origin https://github.com/hainiu3/Kivo.git
+git -C /opt/kivo remote set-url origin https://github.com/hainiu6/kivo.git
 bash /opt/kivo/scripts/upgrade.sh
 ```
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
-REPO_URL="${KIVO_REPO_URL:-https://github.com/hainiu3/Kivo.git}"
+REPO_URL="${KIVO_REPO_URL:-https://github.com/hainiu6/kivo.git}"
 INSTALL_DIR="${KIVO_INSTALL_DIR:-/opt/kivo}"
 if [[ $EUID -ne 0 ]]; then echo '请使用 sudo bash 运行安装脚本。' >&2; exit 1; fi
 if [[ ! -r /etc/os-release ]]; then echo '需要 Debian 12 或 13。' >&2; exit 1; fi
